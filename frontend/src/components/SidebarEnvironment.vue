@@ -19,13 +19,6 @@
 -->
 <template>
   <div class="sidebar-env">
-    <div class="score-headline">
-      <span class="score-headline__label">Constraints Score</span>
-      <span class="score-headline__value" :style="{ color: scoreColor }">
-        {{ data.score.toFixed(0) }}<span class="score-headline__max">/100</span>
-      </span>
-    </div>
-
     <!-- Hard exclusion banner -->
     <div class="exclusion-banner" v-if="data.has_hard_exclusion">
       <ShieldAlert :size="14" />
@@ -106,13 +99,6 @@ import { ShieldAlert } from 'lucide-vue-next'
 import type { TileEnvironment } from '@/types'
 
 const props = defineProps<{ data: TileEnvironment }>()
-
-const scoreColor = computed(() => {
-  const s = props.data.score
-  if (s >= 70) return '#4575b4'   // blue = unconstrained
-  if (s >= 40) return '#ffffbf'   // yellow = moderate
-  return '#d73027'                // orange-red = constrained
-})
 
 const landslideClass = computed(() => {
   const suscep = props.data.landslide_susceptibility

@@ -10,9 +10,10 @@
 # pipeline ingestion, restart Martin: docker compose restart martin
 #
 # Martin v1.x notes:
-#   - DATABASE_URL env var is read automatically (no connection_string needed)
-#   - tile_heatmap and all PostGIS tables are auto-discovered (no function_sources needed)
-#   - cors: true is the default (allow all origins)
+#   - auto_publish: true re-enables auto-discovery of tables and functions
+#   - When a postgres: block is present, DATABASE_URL env var is ignored.
+#     The connection_string must be given explicitly in the block.
+#   - cors: true allows all origins
 ###############################################################
 
 # Server settings
@@ -21,9 +22,24 @@ listen_addresses: "0.0.0.0:3000"
 # Worker threads (tune for production)
 worker_processes: 4
 
-# CORS — allow all origins in dev; set specific origins in prod:
-# cors:
-#   origin:
-#     - "http://localhost:5173"
-#     - "http://localhost:80"
+# CORS — allow all origins in dev
 cors: true
+
+postgres:
+  connection_string: ${DATABASE_URL}
+  auto_publish: true
+  tables:
+    county_outlines:
+      schema: public
+      table: county_outlines
+      srid: 4326
+      geometry_column: geom
+      bounds:
+        - -10.493697908251221
+        - 51.411180267672506
+        - -5.887347306281556
+        - 55.29881656409948
+      geometry_type: MULTIPOLYGON
+      properties:
+        id: integer
+        county: text

@@ -17,11 +17,6 @@
 -->
 <template>
   <div class="sidebar-energy">
-    <div class="score-headline">
-      <span class="score-headline__label">Energy Score</span>
-      <span class="score-headline__value">{{ data.score.toFixed(0) }}<span class="score-headline__max">/100</span></span>
-    </div>
-
     <!-- Low-confidence flag -->
     <div class="warning-banner" v-if="data.grid_low_confidence">
       <AlertTriangle :size="14" />
@@ -101,10 +96,6 @@ defineProps<{ data: TileEnergy }>()
 
 <style scoped>
 .sidebar-energy { display: flex; flex-direction: column; gap: 20px; }
-.score-headline { display: flex; align-items: baseline; justify-content: space-between; }
-.score-headline__label { font-size: 13px; color: rgba(255,255,255,0.5); text-transform: uppercase; letter-spacing: 0.05em; }
-.score-headline__value { font-size: 36px; font-weight: 800; color: #fd8d3c; }
-.score-headline__max { font-size: 16px; color: rgba(255,255,255,0.4); font-weight: 400; margin-left: 2px; }
 .warning-banner { display: flex; align-items: center; gap: 6px; background: rgba(253, 141, 60, 0.12); border: 1px solid rgba(253, 141, 60, 0.3); border-radius: 6px; padding: 8px 12px; font-size: 12px; color: #fd8d3c; }
 .section__title { font-size: 11px; font-weight: 600; color: rgba(255,255,255,0.4); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 10px; }
 .kv-row { display: flex; justify-content: space-between; font-size: 13px; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.06); }

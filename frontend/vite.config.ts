@@ -16,7 +16,18 @@ import vue from '@vitejs/plugin-vue'
 import { fileURLToPath, URL } from 'node:url'
 
 export default defineConfig({
-  plugins: [vue()],
+  plugins: [
+    // Treat .geojson files as JSON modules (Vite's built-in JSON plugin only covers .json)
+    {
+      name: 'geojson-loader',
+      transform(src, id) {
+        if (id.endsWith('.geojson')) {
+          return { code: `export default ${src}`, map: null }
+        }
+      },
+    },
+    vue(),
+  ],
 
   test: {
     environment: 'jsdom',

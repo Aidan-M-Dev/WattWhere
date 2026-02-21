@@ -1,0 +1,31 @@
+/* ── Design tokens — HackEurope Ireland Data Centre Suitability ── */
+:root {
+  /* Backgrounds */
+  --color-bg:        #000000;
+  --color-surface:   #1e1b1b;
+  --color-surface-2: #272322;
+
+  /* Text */
+  --color-text:       #e8eaf0;
+  --color-text-muted: #656161;
+
+  /* Border */
+  --color-border: rgba(255, 255, 255, 0.08);
+
+  /* Accent — overridden per sort by App.vue :style binding */
+  --color-accent: #488bff;
+
+  /* Radii */
+  --radius-sm: 8px;
+  --radius-md: 14px;
+  --radius-lg: 22px;
+
+  /* Diagonal grid pattern used on surfaces (matches Figma hatch) */
+  --pattern-grid: repeating-linear-gradient(
+    -11.9deg,
+    rgba(101, 97, 97, 0.18) 0,
+    rgba(101, 97, 97, 0.18) 0.5px,
+    transparent 0.5px,
+    transparent 18px
+  );
+}

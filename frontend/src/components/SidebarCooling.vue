@@ -17,11 +17,6 @@
 -->
 <template>
   <div class="sidebar-cooling">
-    <div class="score-headline">
-      <span class="score-headline__label">Cooling Score</span>
-      <span class="score-headline__value">{{ data.score.toFixed(0) }}<span class="score-headline__max">/100</span></span>
-    </div>
-
     <section class="section">
       <h3 class="section__title">Climate</h3>
       <div class="kv-row">
@@ -96,10 +91,6 @@ defineProps<{ data: TileCooling }>()
 
 <style scoped>
 .sidebar-cooling { display: flex; flex-direction: column; gap: 20px; }
-.score-headline { display: flex; align-items: baseline; justify-content: space-between; }
-.score-headline__label { font-size: 13px; color: rgba(255,255,255,0.5); text-transform: uppercase; letter-spacing: 0.05em; }
-.score-headline__value { font-size: 36px; font-weight: 800; color: #6baed6; }
-.score-headline__max { font-size: 16px; color: rgba(255,255,255,0.4); font-weight: 400; margin-left: 2px; }
 .section__title { font-size: 11px; font-weight: 600; color: rgba(255,255,255,0.4); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 10px; }
 .kv-row { display: flex; justify-content: space-between; align-items: center; font-size: 13px; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.06); }
 .kv-row__label { color: rgba(255,255,255,0.5); }

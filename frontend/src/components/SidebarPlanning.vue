@@ -17,11 +17,6 @@
 -->
 <template>
   <div class="sidebar-planning">
-    <div class="score-headline">
-      <span class="score-headline__label">Planning Score</span>
-      <span class="score-headline__value">{{ data.score.toFixed(0) }}<span class="score-headline__max">/100</span></span>
-    </div>
-
     <!-- Zoning breakdown -->
     <section class="section">
       <h3 class="section__title">Zoning Breakdown</h3>
@@ -102,10 +97,6 @@ const zoningSegments = computed(() => [
 
 <style scoped>
 .sidebar-planning { display: flex; flex-direction: column; gap: 20px; }
-.score-headline { display: flex; align-items: baseline; justify-content: space-between; }
-.score-headline__label { font-size: 13px; color: rgba(255,255,255,0.5); text-transform: uppercase; letter-spacing: 0.05em; }
-.score-headline__value { font-size: 36px; font-weight: 800; color: #fd8d3c; }
-.score-headline__max { font-size: 16px; color: rgba(255,255,255,0.4); font-weight: 400; margin-left: 2px; }
 .section__title { font-size: 11px; font-weight: 600; color: rgba(255,255,255,0.4); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 10px; }
 
 .zoning-bar { display: flex; height: 10px; border-radius: 5px; overflow: hidden; gap: 1px; margin-bottom: 12px; }

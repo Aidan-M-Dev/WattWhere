@@ -31,6 +31,10 @@
     <!-- MapLibre map renders into this div -->
     <div ref="mapEl" class="map" />
 
+    <!-- Decorative diagonal grid overlay — matches Figma design.
+         pointer-events: none so map interactions pass through. -->
+    <div class="map-grid-overlay" aria-hidden="true" />
+
     <!-- Map Legend: positioned bottom-left inside map viewport -->
     <MapLegend class="map-legend" />
 
@@ -47,6 +51,7 @@ import maplibregl from 'maplibre-gl'
 import { useSuitabilityStore } from '@/stores/suitability'
 import { COLOR_RAMPS, TEMPERATURE_RAMP } from '@/types'
 import MapLegend from '@/components/MapLegend.vue'
+import irelandCounties from '@/assets/ireland-counties.json'
 
 const store = useSuitabilityStore()
 
@@ -62,18 +67,25 @@ onMounted(() => {
 
   map = new maplibregl.Map({
     container: mapEl.value,
-    style: 'https://tiles.openfreemap.org/styles/liberty',
+    // Minimal dark style: pure black background, no basemap tiles.
+    // Ireland tiles from Martin render directly on the black canvas.
+    // Glyphs needed for any future symbol layers (cluster labels).
+    style: {
+      version: 8,
+      glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',
+      sources: {},
+      layers: [
+        {
+          id: 'background',
+          type: 'background',
+          paint: { 'background-color': '#000000' },
+        },
+      ],
+    },
     center: [-7.6, 53.4],  // Ireland centroid
     zoom: 6.5,
     minZoom: 5,
     maxZoom: 18,
-    // OpenFreeMap's glyph server at tiles.openfreemap.org/fonts/ returns 404.
-    // Redirect glyph requests to the MapLibre demo tiles font CDN instead.
-    transformRequest: (url, resourceType) => {
-      if (resourceType === 'Glyphs' && url.startsWith('https://tiles.openfreemap.org/fonts/')) {
-        return { url: url.replace('https://tiles.openfreemap.org/fonts/', 'https://demotiles.maplibre.org/font/') }
-      }
-    },
   })
 
   map.addControl(new maplibregl.NavigationControl(), 'top-right')
@@ -103,6 +115,12 @@ function setupSources() {
     maxzoom: 14,
   })
 
+  // County outline GeoJSON source — exported from PostGIS, pans/zooms with the map
+  map.addSource('county-outlines', {
+    type: 'geojson',
+    data: irelandCounties as unknown as GeoJSON.FeatureCollection,
+  })
+
   // Pins GeoJSON source (with clustering)
   map.addSource('pins', {
     type: 'geojson',
@@ -129,11 +147,11 @@ function setupLayers() {
     'source-layer': 'tile_heatmap',
     paint: {
       'fill-color': buildColorExpression(),
-      'fill-opacity': 0.7,
+      'fill-opacity': 0.45,
     },
   }, firstSymbolId)
 
-  // Layer 3: Tile grid borders — subtle white lines between tiles
+  // Layer 3: Tile grid borders — visible white lines between tiles on dark bg
   map.addLayer({
     id: 'tiles-border',
     type: 'line',
@@ -141,10 +159,22 @@ function setupLayers() {
     'source-layer': 'tile_heatmap',
     paint: {
       'line-color': '#ffffff',
-      'line-opacity': 0.25,
-      'line-width': 0.5,
+      'line-opacity': 0.4,
+      'line-width': 0.75,
     },
   }, firstSymbolId)
+
+  // Layer 3b: County outlines — real PostGIS geometry via Martin, renders above choropleth
+  map.addLayer({
+    id: 'county-lines',
+    type: 'line',
+    source: 'county-outlines',
+    paint: {
+      'line-color': '#ffffff',
+      'line-opacity': 0.55,
+      'line-width': 1.5,
+    },
+  })
 
   // Layer 4: Clustered pin circles — visible when multiple pins overlap at low zoom
   // filter: ['has', 'point_count'] means "only show features that MapLibre has clustered"
@@ -381,13 +411,36 @@ watch(() => store.sidebarOpen, (isOpen) => {
 .map {
   width: 100%;
   height: 100%;
+  background: #000000;
+}
+
+.map-grid-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+  background:
+    repeating-linear-gradient(
+      -11.9deg,
+      rgba(101, 97, 97, 0.35) 0,
+      rgba(101, 97, 97, 0.35) 0.5px,
+      transparent 0.5px,
+      transparent 18px
+    ),
+    repeating-linear-gradient(
+      78.1deg,
+      rgba(101, 97, 97, 0.35) 0,
+      rgba(101, 97, 97, 0.35) 0.5px,
+      transparent 0.5px,
+      transparent 18px
+    );
 }
 
 .map-legend {
   position: absolute;
   bottom: 36px;  /* above MapLibre attribution bar */
   left: 12px;
-  z-index: 10;
+  z-index: 20;
 }
 
 .map-toast {

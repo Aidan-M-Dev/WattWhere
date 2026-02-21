@@ -110,18 +110,20 @@ async function onMetricClick(metric: string) {
 
 <style scoped>
 .databar {
-  background: #0f0f1a;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--color-surface);
+  background-image: var(--pattern-grid);
+  border-top: 1px solid var(--color-border);
   user-select: none;
 }
 
-/* Primary row */
+/* Primary row: square sort tiles */
 .databar-sorts {
   display: flex;
-  gap: 2px;
-  padding: 6px 12px 4px;
+  justify-content: flex-start;
+  gap: 6px;
+  padding: 8px 12px 4px;
   overflow-x: auto;
-  scrollbar-width: none;  /* hide scrollbar on mobile */
+  scrollbar-width: none;
 }
 
 .databar-sorts::-webkit-scrollbar {
@@ -130,32 +132,38 @@ async function onMetricClick(metric: string) {
 
 .sort-tab {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 6px;
-  padding: 7px 14px;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: rgba(255, 255, 255, 0.6);
+  gap: 4px;
+  padding: 8px 14px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: var(--color-surface-2);
+  color: var(--color-text-muted);
   cursor: pointer;
-  font-size: 13px;
+  font-size: 11px;
   font-weight: 500;
   white-space: nowrap;
-  transition: background 0.15s, color 0.15s;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
 
 .sort-tab:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: white;
+  background: color-mix(in srgb, var(--color-accent) 10%, var(--color-surface-2));
+  color: var(--color-text);
 }
 
 .sort-tab--active {
-  background: rgba(255, 255, 255, 0.15);
-  color: white;
+  background: color-mix(in srgb, var(--color-accent) 15%, var(--color-surface-2));
+  color: var(--color-accent);
+  border-color: color-mix(in srgb, var(--color-accent) 40%, transparent);
   font-weight: 700;
 }
 
-/* Secondary row */
+.sort-tab__icon {
+  flex-shrink: 0;
+}
+
+/* Secondary row: metric pills */
 .databar-metrics {
   display: flex;
   gap: 6px;
@@ -173,10 +181,10 @@ async function onMetricClick(metric: string) {
   align-items: center;
   gap: 4px;
   padding: 3px 10px;
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  border: 1px solid var(--color-border);
   border-radius: 99px;
   background: transparent;
-  color: rgba(255, 255, 255, 0.55);
+  color: var(--color-text-muted);
   cursor: pointer;
   font-size: 11px;
   white-space: nowrap;
@@ -184,14 +192,14 @@ async function onMetricClick(metric: string) {
 }
 
 .metric-pill:hover {
-  border-color: rgba(255, 255, 255, 0.5);
-  color: rgba(255, 255, 255, 0.85);
+  border-color: rgba(255, 255, 255, 0.3);
+  color: var(--color-text);
 }
 
 .metric-pill--active {
-  border-color: rgba(255, 255, 255, 0.7);
-  background: rgba(255, 255, 255, 0.12);
-  color: white;
+  border-color: color-mix(in srgb, var(--color-accent) 60%, transparent);
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  color: var(--color-accent);
 }
 
 .metric-pill__unit {
@@ -202,15 +210,15 @@ async function onMetricClick(metric: string) {
 /* Skeleton loading */
 .databar-skeleton {
   display: flex;
-  gap: 4px;
-  padding: 6px 12px;
+  gap: 6px;
+  padding: 8px 12px;
 }
 
 .skeleton-tab {
-  width: 90px;
-  height: 32px;
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.08);
+  width: 70px;
+  height: 52px;
+  border-radius: var(--radius-md);
+  background: var(--color-surface-2);
   animation: pulse 1.5s ease-in-out infinite;
 }
 

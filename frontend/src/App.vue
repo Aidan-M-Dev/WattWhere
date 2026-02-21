@@ -1,43 +1,35 @@
 <!--
   FILE: frontend/src/App.vue
-  Role: Root component — mounts store, lays out DataBar + MapView + Sidebar + Legend.
+  Role: Root component — mounts store, lays out MapView + Sidebar + DataBar (bottom).
   Agent boundary: Frontend — layout shell
   Dependencies: useSuitabilityStore (must call init()), MapView, DataBar, Sidebar, MapLegend
   Output: Full-screen SPA layout
-  How to test: npm run dev — all 4 child components should render
 
   Layout structure:
     ┌─────────────────────────────────────┐
-    │ DataBar (sort + sub-metric tabs)    │
-    ├─────────────────────────────────────┤
     │                          │          │
     │  MapView                 │ Sidebar  │
     │  (MapLibre choropleth)   │ (slide)  │
     │                          │          │
-    │ [MapLegend]              │          │
+    ├─────────────────────────────────────┤
+    │ DataBar (sort tiles + sub-metric)   │
     └─────────────────────────────────────┘
 -->
 <template>
-  <div class="app-shell">
-    <!-- DataBar: sort tabs + sub-metric pills -->
-    <DataBar class="app-databar" />
-
+  <div class="app-shell" :style="{ '--color-accent': accentColor }">
     <!-- Main content area: map + sidebar side by side -->
     <div class="app-main">
-      <!-- Map takes remaining space; sidebar overlays or pushes it -->
       <MapView class="app-map" />
-
-      <!-- Sidebar slides in from right on tile click -->
       <Sidebar class="app-sidebar" />
     </div>
 
-    <!-- Map legend: fixed bottom-left inside map viewport -->
-    <!-- Rendered inside MapView to position relative to map bounds -->
+    <!-- DataBar: sort tiles + sub-metric pills — fixed at bottom -->
+    <DataBar class="app-databar" />
   </div>
 </template>
 
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useSuitabilityStore } from '@/stores/suitability'
 import DataBar from '@/components/DataBar.vue'
 import MapView from '@/components/MapView.vue'
@@ -45,10 +37,21 @@ import Sidebar from '@/components/Sidebar.vue'
 
 const store = useSuitabilityStore()
 
-// Initialise on mount: fetch sorts metadata + initial pins
 onMounted(async () => {
   await store.init()
 })
+
+// ── Per-sort accent colours (from Figma SVG) ────────────────
+const SORT_COLORS: Record<string, string> = {
+  overall:      '#488bff',
+  energy:       '#fee000',
+  environment:  '#2cb549',
+  cooling:      '#38bdf8',
+  connectivity: '#a78bfa',
+  planning:     '#fb923c',
+}
+
+const accentColor = computed(() => SORT_COLORS[store.activeSort] ?? '#488bff')
 </script>
 
 <style>
@@ -64,8 +67,8 @@ html, body, #app {
   width: 100%;
   overflow: hidden;
   font-family: system-ui, -apple-system, sans-serif;
-  background: #1a1a2e;
-  color: #e8e8e8;
+  background: var(--color-bg);
+  color: var(--color-text);
 }
 
 /* App shell: full-height flex column */
@@ -76,13 +79,7 @@ html, body, #app {
   width: 100vw;
 }
 
-/* DataBar: fixed height at top */
-.app-databar {
-  flex-shrink: 0;
-  z-index: 100;
-}
-
-/* Main area: map + sidebar, fills remaining height */
+/* Main area: map + sidebar, fills all space above DataBar */
 .app-main {
   display: flex;
   flex: 1;
@@ -103,6 +100,11 @@ html, body, #app {
   right: 0;
   height: 100%;
   z-index: 200;
-  /* Width and visibility controlled by Sidebar.vue itself */
+}
+
+/* DataBar: fixed height at bottom */
+.app-databar {
+  flex-shrink: 0;
+  z-index: 100;
 }
 </style>

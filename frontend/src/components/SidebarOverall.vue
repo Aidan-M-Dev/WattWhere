@@ -18,14 +18,6 @@
 -->
 <template>
   <div class="sidebar-overall">
-    <!-- Overall score headline -->
-    <div class="score-headline">
-      <span class="score-headline__label">Overall Suitability</span>
-      <span class="score-headline__value" :style="{ color: scoreColor }">
-        {{ data.score.toFixed(0) }}<span class="score-headline__max">/100</span>
-      </span>
-    </div>
-
     <!-- Hard exclusion banner -->
     <div class="exclusion-banner" v-if="data.has_hard_exclusion">
       <ShieldAlert :size="14" />
@@ -82,67 +74,48 @@ import type { TileOverall } from '@/types'
 
 const props = defineProps<{ data: TileOverall }>()
 
-// ── Score colour (green ramp) ─────────────────────────────────
-const scoreColor = computed(() => {
-  const s = props.data.score
-  if (s >= 75) return '#00a651'
-  if (s >= 50) return '#74c476'
-  if (s >= 25) return '#fdae61'
-  return '#d73027'
-})
-
-// ── Sub-score rows ────────────────────────────────────────────
+// ── Sub-score rows (each uses its own sort colour) ────────────
 const subScores = computed(() => [
   {
     key: 'energy',
     label: 'Energy',
     value: props.data.energy_score,
     weight: props.data.weights?.energy ?? 0.25,
-    color: '#fd8d3c',
+    color: '#fee000',
   },
   {
     key: 'connectivity',
     label: 'Connectivity',
     value: props.data.connectivity_score,
     weight: props.data.weights?.connectivity ?? 0.25,
-    color: '#9e9ac8',
+    color: '#a78bfa',
   },
   {
     key: 'environment',
     label: 'Constraints',
     value: props.data.environment_score,
     weight: props.data.weights?.environment ?? 0.20,
-    color: '#4575b4',
+    color: '#2cb549',
   },
   {
     key: 'cooling',
     label: 'Cooling',
     value: props.data.cooling_score,
     weight: props.data.weights?.cooling ?? 0.15,
-    color: '#6baed6',
+    color: '#38bdf8',
   },
   {
     key: 'planning',
     label: 'Planning',
     value: props.data.planning_score,
     weight: props.data.weights?.planning ?? 0.15,
-    color: '#fd8d3c',
+    color: '#fb923c',
   },
 ])
 </script>
 
 <style scoped>
 .sidebar-overall { display: flex; flex-direction: column; gap: 20px; }
-
-.score-headline {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-}
-
-.score-headline__label { font-size: 13px; color: rgba(255,255,255,0.5); text-transform: uppercase; letter-spacing: 0.05em; }
-.score-headline__value { font-size: 36px; font-weight: 800; }
-.score-headline__max { font-size: 16px; color: rgba(255,255,255,0.4); font-weight: 400; margin-left: 2px; }
 
 .exclusion-banner {
   display: flex;

@@ -41,6 +41,23 @@
       </button>
     </div>
 
+    <!-- Score ring (shown whenever tile data is loaded) -->
+    <div class="sidebar__ring-wrap" v-if="store.selectedTileData && !store.loading">
+      <svg class="sidebar__ring" viewBox="0 0 120 120" aria-hidden="true">
+        <!-- Track -->
+        <circle cx="60" cy="60" r="48" class="ring-track" />
+        <!-- Filled arc: circumference = 2π×48 ≈ 301.6 -->
+        <circle
+          cx="60" cy="60" r="48"
+          class="ring-fill"
+          :stroke-dasharray="`${(tileBase?.score ?? 0) / 100 * 301.6} 301.6`"
+          transform="rotate(-90 60 60)"
+          stroke-linecap="round"
+        />
+      </svg>
+      <span class="sidebar__ring-value">{{ (tileBase?.score ?? 0).toFixed(0) }}<span class="sidebar__ring-pct">%</span></span>
+    </div>
+
     <!-- Body: Loading skeleton -->
     <div class="sidebar__body" v-if="store.loading && !store.selectedTileData">
       <div class="skeleton-block" v-for="i in 4" :key="i" />
@@ -120,8 +137,9 @@ async function retry() {
 .sidebar {
   width: 0;
   height: 100%;
-  background: #0f0f1a;
-  border-left: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--color-surface);
+  background-image: var(--pattern-grid);
+  border-left: 1px solid var(--color-border);
   overflow: hidden;
   transition: width 0.25s ease;
   display: flex;
@@ -145,7 +163,7 @@ async function retry() {
   align-items: flex-start;
   justify-content: space-between;
   padding: 16px 16px 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid var(--color-border);
   flex-shrink: 0;
 }
 
@@ -158,29 +176,72 @@ async function retry() {
 .sidebar__county {
   font-size: 15px;
   font-weight: 700;
-  color: #fff;
+  color: var(--color-text);
 }
 
 .sidebar__ref {
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--color-text-muted);
   font-family: monospace;
 }
 
 .sidebar__close {
   background: none;
   border: none;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--color-text-muted);
   cursor: pointer;
   padding: 4px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   transition: color 0.12s, background 0.12s;
   flex-shrink: 0;
 }
 
 .sidebar__close:hover {
-  color: white;
-  background: rgba(255, 255, 255, 0.1);
+  color: var(--color-text);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* Score ring */
+.sidebar__ring-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px 0 12px;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.sidebar__ring {
+  width: 110px;
+  height: 110px;
+}
+
+.ring-track {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.08);
+  stroke-width: 10;
+}
+
+.ring-fill {
+  fill: none;
+  stroke: var(--color-accent);
+  stroke-width: 10;
+  transition: stroke-dasharray 0.5s ease;
+}
+
+.sidebar__ring-value {
+  position: absolute;
+  font-size: 28px;
+  font-weight: 800;
+  color: var(--color-accent);
+  line-height: 1;
+}
+
+.sidebar__ring-pct {
+  font-size: 14px;
+  font-weight: 600;
+  opacity: 0.7;
 }
 
 /* Body */

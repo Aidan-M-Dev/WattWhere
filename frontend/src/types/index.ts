@@ -213,31 +213,33 @@ export type TileData =
 // ── Colour ramp constants (used by MapView + MapLegend) ───────
 // Defined here once — import in components, do not redefine per-component
 
+// Dark-mode ramps: dark at 0 → bright accent colour at 100.
+// Designed for black map background — low scores are near-black, high scores glow.
 export const COLOR_RAMPS: Record<SortType, ColorRamp> = {
   overall: {
     type: 'sequential',
-    stops: [[0, '#f7fcf5'], [50, '#74c476'], [100, '#00441b']],
+    stops: [[0, '#0a1410'], [50, '#1a6b2e'], [100, '#2cb549']],
   },
   energy: {
     type: 'sequential',
-    stops: [[0, '#ffffcc'], [50, '#fd8d3c'], [100, '#bd0026']],
+    stops: [[0, '#1a1500'], [50, '#9a8500'], [100, '#fee000']],
   },
   environment: {
     type: 'diverging',
-    // 0 = heavily constrained (orange/red), 100 = unconstrained (blue)
-    stops: [[0, '#d73027'], [50, '#ffffbf'], [100, '#4575b4']],
+    // 0 = heavily constrained (dark red), 100 = unconstrained (bright green)
+    stops: [[0, '#5a0a00'], [50, '#3a2200'], [100, '#2cb549']],
   },
   cooling: {
     type: 'sequential',
-    stops: [[0, '#f7fbff'], [50, '#6baed6'], [100, '#08306b']],
+    stops: [[0, '#00101a'], [50, '#0a5a8a'], [100, '#38bdf8']],
   },
   connectivity: {
     type: 'sequential',
-    stops: [[0, '#fcfbfd'], [50, '#9e9ac8'], [100, '#3f007d']],
+    stops: [[0, '#0d0a1a'], [50, '#5a3a9e'], [100, '#a78bfa']],
   },
   planning: {
     type: 'sequential',
-    stops: [[0, '#fff5eb'], [50, '#fd8d3c'], [100, '#7f2704']],
+    stops: [[0, '#1a0a00'], [50, '#9a4a18'], [100, '#fb923c']],
   },
 }
 
