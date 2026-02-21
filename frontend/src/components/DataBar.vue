@@ -30,8 +30,6 @@
         :title="sort.description"
         @click="onSortClick(sort.key as SortType)"
       >
-        <!-- TODO: dynamically resolve Lucide icon from sort.icon string -->
-        <!-- Use component(:is) pattern with icon map below -->
         <component :is="getIcon(sort.icon)" :size="16" class="sort-tab__icon" />
         <span class="sort-tab__label">{{ sort.label }}</span>
       </button>

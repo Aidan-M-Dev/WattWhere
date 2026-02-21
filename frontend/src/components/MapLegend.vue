@@ -80,21 +80,18 @@ const unit = computed(() =>
 
 const minLabel = computed(() => {
   if (isRawMetric.value && store.metricRange) {
-    // Temperature: legend min/max are raw °C values (displayed inverted)
-    const val = isTemperature.value
-      ? store.metricRange.max  // inverted: high °C = poor cooling = low score = left
-      : store.metricRange.min
-    return `${val.toFixed(1)} ${store.metricRange.unit}`
+    // For all raw metrics, left end = minimum raw value.
+    // Temperature inverted: min °C = cold = dark blue = left = best for cooling.
+    return `${store.metricRange.min.toFixed(1)} ${store.metricRange.unit}`
   }
   return '0'
 })
 
 const maxLabel = computed(() => {
   if (isRawMetric.value && store.metricRange) {
-    const val = isTemperature.value
-      ? store.metricRange.min  // inverted: low °C = good cooling = high score = right
-      : store.metricRange.max
-    return `${val.toFixed(1)} ${store.metricRange.unit}`
+    // For all raw metrics, right end = maximum raw value.
+    // Temperature inverted: max °C = warm = light = right = poor for cooling.
+    return `${store.metricRange.max.toFixed(1)} ${store.metricRange.unit}`
   }
   return '100'
 })
@@ -104,18 +101,18 @@ const gradientCss = computed(() => {
   const ramp = COLOR_RAMPS[store.activeSort]
   if (!ramp) return 'linear-gradient(to right, #ccc, #666)'
 
-  // Temperature ramp is displayed inverted (high score = left = dark blue = cold)
-  const stops = isTemperature.value
-    ? [...ramp.stops].reverse()
-    : ramp.stops
+  // Temperature ramp: dark blue on left = cold = high cooling score.
+  // Invert by keeping positions (0%, 50%, 100%) but reversing the colour order.
+  // Simply reversing the stop array produces descending positions (invalid CSS).
+  let stops: [number, string][]
+  if (isTemperature.value) {
+    const reversedColors = [...ramp.stops].map(([, c]) => c).reverse()
+    stops = ramp.stops.map(([pos], i) => [pos, reversedColors[i]])
+  } else {
+    stops = ramp.stops
+  }
 
-  const parts = stops.map(([stop, color]) => {
-    const pct = ramp.type === 'diverging'
-      ? stop  // stops already in 0–100 percentage
-      : stop
-    return `${color} ${pct}%`
-  })
-
+  const parts = stops.map(([pct, color]) => `${color} ${pct}%`)
   return `linear-gradient(to right, ${parts.join(', ')})`
 })
 </script>
