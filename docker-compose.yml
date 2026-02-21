@@ -1,0 +1,106 @@
+###############################################################
+# FILE: docker-compose.yml
+# Role: Orchestrates all 5 services for the platform.
+# Agent boundary: Deployment layer (§9)
+# Dependencies: .env file with DB_PASSWORD, ADMIN_KEY, MARTIN_PORT, API_PORT
+# Output: Running stack accessible at http://localhost (nginx reverse proxy)
+# How to test: docker compose up --build; curl http://localhost/api/sorts
+###############################################################
+
+services:
+  # ── Database ──────────────────────────────────────────────────
+  db:
+    image: postgis/postgis:16-3.4
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: hackeurope
+      POSTGRES_USER: hackeurope
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./sql/tables.sql:/docker-entrypoint-initdb.d/01_tables.sql
+      - ./sql/indexes.sql:/docker-entrypoint-initdb.d/02_indexes.sql
+      - ./sql/functions.sql:/docker-entrypoint-initdb.d/03_functions.sql
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hackeurope -d hackeurope"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Martin tile server ────────────────────────────────────────
+  martin:
+    image: ghcr.io/maplibre/martin:latest
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://hackeurope:${DB_PASSWORD}@db:5432/hackeurope
+    volumes:
+      - ./martin/config.yaml:/config.yaml
+    command: --config /config.yaml
+    ports:
+      - "${MARTIN_PORT:-3000}:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # ── FastAPI ───────────────────────────────────────────────────
+  api:
+    build: ./api
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://hackeurope:${DB_PASSWORD}@db:5432/hackeurope
+      ADMIN_KEY: ${ADMIN_KEY}
+    ports:
+      - "${API_PORT:-8000}:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./api:/app  # dev hot-reload via uvicorn --reload
+
+  # ── Frontend (Vite dev / nginx prod) ─────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      target: dev  # switch to 'prod' for production build
+    restart: unless-stopped
+    ports:
+      - "5173:5173"
+    depends_on:
+      - api
+      - martin
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+
+  # ── Nginx reverse proxy ───────────────────────────────────────
+  nginx:
+    image: nginx:alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - frontend
+      - api
+      - martin
+
+  # ── Pipeline (run manually / on schedule, not always up) ─────
+  pipeline:
+    build: ./pipeline
+    profiles:
+      - pipeline  # only starts with: docker compose --profile pipeline up pipeline
+    environment:
+      DATABASE_URL: postgresql://hackeurope:${DB_PASSWORD}@db:5432/hackeurope
+    volumes:
+      - ./pipeline:/app
+      - pipeline_data:/data  # raw source files mount point
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  pipeline_data:

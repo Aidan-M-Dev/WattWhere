@@ -1,0 +1,29 @@
+###############################################################
+# FILE: martin/config.yaml
+# Role: Martin MVT tile server configuration.
+# Agent boundary: Martin config layer (§7, §10)
+# Dependencies: PostgreSQL db service healthy; sql/functions.sql applied (tile_heatmap function exists)
+# Output: MVT tiles at http://martin:3000/tile_heatmap/{z}/{x}/{y}?sort=X&metric=Y
+# How to test: curl "http://localhost:3000/tile_heatmap/6/31/21?sort=overall&metric=score" | file -
+#
+# IMPORTANT: Martin caches tiles in memory. If sort table data changes after
+# pipeline ingestion, restart Martin: docker compose restart martin
+#
+# Martin v1.x notes:
+#   - DATABASE_URL env var is read automatically (no connection_string needed)
+#   - tile_heatmap and all PostGIS tables are auto-discovered (no function_sources needed)
+#   - cors: true is the default (allow all origins)
+###############################################################
+
+# Server settings
+listen_addresses: "0.0.0.0:3000"
+
+# Worker threads (tune for production)
+worker_processes: 4
+
+# CORS — allow all origins in dev; set specific origins in prod:
+# cors:
+#   origin:
+#     - "http://localhost:5173"
+#     - "http://localhost:80"
+cors: true
