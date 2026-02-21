@@ -124,6 +124,7 @@ const zoningSegments = computed(() => [
 .status--refused { background: rgba(231,76,60,0.2); color: #e74c3c; }
 .status--pending { background: rgba(253,141,60,0.2); color: #fd8d3c; }
 .status--withdrawn { background: rgba(255,255,255,0.1); color: rgba(255,255,255,0.4); }
+.status--other { background: rgba(255,255,255,0.1); color: rgba(255,255,255,0.4); }
 .app-row__meta { font-size: 11px; color: rgba(255,255,255,0.35); }
 
 .no-data { font-size: 12px; color: rgba(255,255,255,0.3); font-style: italic; padding: 6px 0; }

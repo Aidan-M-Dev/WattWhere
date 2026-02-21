@@ -511,7 +511,7 @@ cd frontend && npm run test
 
 ---
 
-### TASK-05 · DataBar + MapLegend
+### COMPLETED TASK-05 · DataBar + MapLegend
 
 **Goal**: Sort tabs and sub-metric pills are fully interactive. Switching sort triggers
 map update. Switching metric triggers legend update. MapLegend displays correct gradient
@@ -610,7 +610,7 @@ cd frontend && npm run test
 
 ---
 
-### TASK-06 · Sidebar Components
+### COMPLETED TASK-06 · Sidebar Components
 
 **Goal**: Clicking a tile opens the Sidebar with correct sort-specific data.
 All 6 `SidebarX.vue` components render real data from the store. Loading and error
