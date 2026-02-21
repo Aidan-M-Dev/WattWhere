@@ -118,7 +118,7 @@ curl -s -o /dev/null -w "%{http_code}" http://localhost:5173
 
 ---
 
-### TASK-02 · Tile Grid + Synthetic Data Seed
+### COMPLETED TASK-02 · Tile Grid + Synthetic Data Seed
 
 **Goal**: Populate the database with a realistic ~14,000-tile Ireland grid and plausible
 synthetic scores for all 6 sort tables. This is the fastest path to a working map.
