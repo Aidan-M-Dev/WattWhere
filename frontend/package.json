@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
-    "type-check": "vue-tsc --noEmit"
+    "type-check": "vue-tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "@maplibre/maplibre-gl-leaflet": "^0.0.22",
@@ -20,8 +21,10 @@
     "@types/geojson": "^7946.0.14",
     "@types/node": "^22.10.2",
     "@vitejs/plugin-vue": "^5.2.1",
+    "@vue/test-utils": "^2.4.6",
     "typescript": "^5.7.2",
     "vite": "^6.0.5",
+    "vitest": "^2.1.8",
     "vue-tsc": "^2.1.10"
   }
 }

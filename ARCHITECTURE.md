@@ -413,6 +413,20 @@ Both parameters must be included. When `activeMetric` is `'score'`, Martin retur
 
 **Initial view:** `center: [-7.6, 53.4]`, `zoom: 6.5` (all of Ireland).
 
+**Implementation notes (TASK-04):**
+
+- **Base map:** OpenFreeMap Liberty (`https://tiles.openfreemap.org/styles/liberty`). Free, no API key. Can be replaced with MapTiler OSM Bright if a key is available.
+- **Hover highlight is `type: "line"`, not `type: "fill"`.** The spec above says `type: "fill"` with transparent fill, but MapLibre does not render `fill-outline-color` when `fill-opacity` is 0. A `line` layer with 2px white stroke at 0.8 opacity achieves the intended effect.
+- **Pins use `type: "circle"` (not `type: "symbol"`).** Symbol layers require sprite images to be loaded into the map style. Circle layers work without any sprite setup and provide pin type differentiation via a `match` expression on the `type` property. Upgrading to sprite-based icons is a Phase 2 task.
+- **Pin colours per type:** Defined in a `match` expression in `MapView.vue` `setupLayers()`. Each pin type (e.g. `data_centre`, `wind_farm`, `sac`) maps to a hex colour. Fallback: `#cccccc`.
+- **Sidebar padding:** On tile select, `map.easeTo({ padding: { right: 380 } })` shifts the viewport. On sidebar close, padding resets to 0. Both animate over 300ms.
+- **Reactive watchers:** Three Vue `watch()` calls drive map updates:
+  1. `martinTileUrl` → `source.setTiles()` + repaint fill colour (fires on sort OR metric change)
+  2. `pins` → `source.setData()` (fires after pin fetch on sort change)
+  3. `sidebarOpen` → clear selected tile filter + reset padding (fires on sidebar close)
+- **`SortMeta` type does not include `colorRamp`.** The API returns `{key, label, icon, description, metrics}`. Colour ramps are defined client-side in `COLOR_RAMPS` (`types/index.ts`) because they are a rendering concern. Components look up ramps via `COLOR_RAMPS[activeSort]`, not via `sortsMeta`.
+- **Unit tests:** 15 Vitest tests in `stores/suitability.test.ts` cover all state transitions, `martinTileUrl` reactivity, and fetch mock routing. Run via `npm run test`.
+
 ### 6.3 Component: `DataBar`
 
 Horizontal bar below any app header. Two rows:

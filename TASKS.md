@@ -394,7 +394,7 @@ print('tile OK:', data['county'], data['score'])
 
 ---
 
-### TASK-04 · MapView + Pinia Store
+### COMPLETED TASK-04 · MapView + Pinia Store
 
 **Goal**: The map renders Ireland with choropleth tile colouring from Martin MVT tiles,
 pins are visible, hover and click interactions work, and switching sort/metric updates

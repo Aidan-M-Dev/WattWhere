@@ -36,7 +36,6 @@ export interface SortMeta {
   icon: string        // Lucide icon name e.g. 'Zap'
   description: string
   metrics: MetricMeta[]
-  colorRamp: ColorRamp
 }
 
 /** Colour ramp definition for each sort */

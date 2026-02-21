@@ -85,7 +85,6 @@ export const useSuitabilityStore = defineStore('suitability', () => {
     loading.value = true
     error.value = null
     try {
-      // TODO: implement
       const response = await fetch(`${API_BASE}/sorts`)
       if (!response.ok) throw new Error(`/api/sorts returned ${response.status}`)
       const data = await response.json()
@@ -104,7 +103,6 @@ export const useSuitabilityStore = defineStore('suitability', () => {
   async function fetchPins(sort: SortType) {
     pinsLoading.value = true
     try {
-      // TODO: implement
       const response = await fetch(`${API_BASE}/pins?sort=${sort}`)
       if (!response.ok) throw new Error(`/api/pins returned ${response.status}`)
       const data = await response.json()
@@ -125,7 +123,6 @@ export const useSuitabilityStore = defineStore('suitability', () => {
     loading.value = true
     error.value = null
     try {
-      // TODO: implement
       const response = await fetch(`${API_BASE}/tile/${tileId}?sort=${sort}`)
       if (!response.ok) throw new Error(`/api/tile returned ${response.status}`)
       const data = await response.json()
@@ -146,7 +143,6 @@ export const useSuitabilityStore = defineStore('suitability', () => {
    */
   async function fetchMetricRange(sort: SortType, metric: string) {
     try {
-      // TODO: implement
       const response = await fetch(`${API_BASE}/metric-range?sort=${sort}&metric=${metric}`)
       if (!response.ok) throw new Error(`/api/metric-range returned ${response.status}`)
       const data = await response.json()
@@ -171,7 +167,6 @@ export const useSuitabilityStore = defineStore('suitability', () => {
     selectedTileData.value = null
     sidebarOpen.value = false
     metricRange.value = null
-    // TODO: martinTileUrl computed auto-updates — trigger map source refresh in MapView
     await fetchPins(sort)
   }
 
@@ -182,7 +177,6 @@ export const useSuitabilityStore = defineStore('suitability', () => {
   async function setActiveMetric(metric: string) {
     if (metric === activeMetric.value) return
     activeMetric.value = metric
-    // TODO: martinTileUrl computed auto-updates — trigger map source refresh in MapView
     // Fetch range only for raw sub-metrics (wind_speed_100m, solar_ghi, temperature, rainfall)
     const rawMetrics = ['wind_speed_100m', 'solar_ghi', 'temperature', 'rainfall']
     if (rawMetrics.includes(metric)) {
