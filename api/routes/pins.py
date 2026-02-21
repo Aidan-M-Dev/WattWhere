@@ -46,23 +46,6 @@ async def get_pins(
       geometry: Point (EPSG:4326)
       properties: { pin_id, tile_id, name, type, ...sort-specific fields }
     """
-    # TODO: implement per-sort SQL queries
-
-    # Query template (substitute pin_table and extra columns per sort):
-    # SELECT
-    #   json_build_object(
-    #     'type', 'Feature',
-    #     'geometry', ST_AsGeoJSON(geom)::json,
-    #     'properties', json_build_object(
-    #       'pin_id', pin_id,
-    #       'tile_id', tile_id,
-    #       'name', name,
-    #       'type', type,
-    #       ... sort-specific columns
-    #     )
-    #   ) AS feature
-    # FROM {pin_table}
-
     SORT_QUERIES: dict[str, str] = {
         "overall": """
             SELECT json_build_object(
@@ -159,7 +142,6 @@ async def get_pins(
     if not query:
         raise HTTPException(status_code=400, detail=f"Unknown sort: {sort}")
 
-    # TODO: implement — execute query and build FeatureCollection
     rows = await conn.fetch(query)
     features = [json.loads(row["feature"]) for row in rows]
 

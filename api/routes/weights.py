@@ -73,7 +73,6 @@ def _check_admin_key(x_admin_key: str | None = Header(default=None)) -> None:
 @router.get("/weights", response_model=WeightsResponse)
 async def get_weights(conn: asyncpg.Connection = Depends(get_conn)) -> WeightsResponse:
     """Return the current composite score weights."""
-    # TODO: implement
     row = await conn.fetchrow(
         "SELECT energy, connectivity, environment, cooling, planning FROM composite_weights WHERE id = 1"
     )
@@ -102,7 +101,6 @@ async def update_weights(
     run: docker compose --profile pipeline run pipeline python overall/compute_composite.py
     Then restart Martin to flush its tile cache.
     """
-    # TODO: implement
     await conn.execute(
         """UPDATE composite_weights SET
             energy = $1, connectivity = $2, environment = $3,

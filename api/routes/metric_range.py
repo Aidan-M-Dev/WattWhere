@@ -62,7 +62,6 @@ async def get_metric_range(
                    f"Only raw sub-metrics have ranges: {list(VALID_RAW_METRICS)}"
         )
 
-    # TODO: implement
     row = await conn.fetchrow(
         "SELECT min_val, max_val, unit FROM metric_ranges WHERE sort = $1 AND metric = $2",
         sort, metric

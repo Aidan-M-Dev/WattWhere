@@ -39,20 +39,6 @@ async def get_tile(
     The response shape is sort-specific (see ARCHITECTURE.md §5 sidebar specs).
     Always includes: tile_id, county, grid_ref, centroid [lng, lat], score.
     """
-    # TODO: implement — per-sort SQL query building the full payload
-
-    # Base tile info (common to all sorts)
-    BASE_SELECT = """
-        SELECT
-            t.tile_id,
-            t.county,
-            t.grid_ref,
-            ST_X(t.centroid) AS lng,
-            ST_Y(t.centroid) AS lat
-        FROM tiles t
-        WHERE t.tile_id = $1
-    """
-
     tile_row = await conn.fetchrow(
         "SELECT tile_id, county, grid_ref, ST_X(centroid) AS lng, ST_Y(centroid) AS lat FROM tiles WHERE tile_id = $1",
         tile_id
@@ -86,7 +72,6 @@ async def get_tile(
 
 async def _get_overall(conn: asyncpg.Connection, tile_id: int, base: dict) -> dict:
     """Fetch overall_scores + composite_weights for overall sidebar."""
-    # TODO: implement
     row = await conn.fetchrow(
         """SELECT o.*, cw.energy, cw.connectivity, cw.environment, cw.cooling, cw.planning
            FROM overall_scores o, composite_weights cw
@@ -119,7 +104,6 @@ async def _get_overall(conn: asyncpg.Connection, tile_id: int, base: dict) -> di
 
 async def _get_energy(conn: asyncpg.Connection, tile_id: int, base: dict) -> dict:
     """Fetch energy_scores for energy sidebar."""
-    # TODO: implement
     row = await conn.fetchrow("SELECT * FROM energy_scores WHERE tile_id = $1", tile_id)
     if not row:
         raise HTTPException(status_code=404, detail=f"No energy score for tile {tile_id}")
@@ -142,7 +126,6 @@ async def _get_energy(conn: asyncpg.Connection, tile_id: int, base: dict) -> dic
 
 async def _get_environment(conn: asyncpg.Connection, tile_id: int, base: dict) -> dict:
     """Fetch environment_scores + tile_designation_overlaps for environment sidebar."""
-    # TODO: implement
     row = await conn.fetchrow("SELECT * FROM environment_scores WHERE tile_id = $1", tile_id)
     if not row:
         raise HTTPException(status_code=404, detail=f"No environment score for tile {tile_id}")
@@ -173,7 +156,6 @@ async def _get_environment(conn: asyncpg.Connection, tile_id: int, base: dict) -
 
 async def _get_cooling(conn: asyncpg.Connection, tile_id: int, base: dict) -> dict:
     """Fetch cooling_scores for cooling sidebar."""
-    # TODO: implement
     row = await conn.fetchrow("SELECT * FROM cooling_scores WHERE tile_id = $1", tile_id)
     if not row:
         raise HTTPException(status_code=404, detail=f"No cooling score for tile {tile_id}")
@@ -196,7 +178,6 @@ async def _get_cooling(conn: asyncpg.Connection, tile_id: int, base: dict) -> di
 
 async def _get_connectivity(conn: asyncpg.Connection, tile_id: int, base: dict) -> dict:
     """Fetch connectivity_scores for connectivity sidebar."""
-    # TODO: implement
     row = await conn.fetchrow("SELECT * FROM connectivity_scores WHERE tile_id = $1", tile_id)
     if not row:
         raise HTTPException(status_code=404, detail=f"No connectivity score for tile {tile_id}")
@@ -219,7 +200,6 @@ async def _get_connectivity(conn: asyncpg.Connection, tile_id: int, base: dict) 
 
 async def _get_planning(conn: asyncpg.Connection, tile_id: int, base: dict) -> dict:
     """Fetch planning_scores + tile_planning_applications for planning sidebar."""
-    # TODO: implement
     row = await conn.fetchrow("SELECT * FROM planning_scores WHERE tile_id = $1", tile_id)
     if not row:
         raise HTTPException(status_code=404, detail=f"No planning score for tile {tile_id}")
