@@ -283,7 +283,7 @@ curl -s "http://localhost:3000/tile_heatmap/6/31/21?sort=overall&metric=score" \
 
 ---
 
-### TASK-03 · FastAPI Routes Implementation
+### COMPLETED TASK-03 · FastAPI Routes Implementation
 
 **Goal**: All 5 route files return correct, validated responses backed by real DB queries.
 No more `raise NotImplementedError` or `return {}` stubs.
