@@ -59,11 +59,12 @@ export const useSuitabilityStore = defineStore('suitability', () => {
 
   /**
    * Martin MVT tile URL — reactive, rebuilt whenever sort or metric changes.
-   * In dev: /tiles/tile_heatmap/{z}/{x}/{y}?sort=X&metric=Y (proxied)
-   * In prod: http://martin:3000/tile_heatmap/{z}/{x}/{y}?sort=X&metric=Y
+   * Must be absolute: MapLibre fetches tiles inside a WebWorker which has no
+   * base URL, so relative paths like /tiles/... fail to construct a Request.
+   * window.location.origin gives http://localhost in dev, the real host in prod.
    */
   const martinTileUrl = computed(() =>
-    `/tiles/tile_heatmap/{z}/{x}/{y}?sort=${activeSort.value}&metric=${activeMetric.value}`
+    `${window.location.origin}/tiles/tile_heatmap/{z}/{x}/{y}?sort=${activeSort.value}&metric=${activeMetric.value}`
   )
 
   // ── Actions ─────────────────────────────────────────────────

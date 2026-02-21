@@ -67,6 +67,13 @@ onMounted(() => {
     zoom: 6.5,
     minZoom: 5,
     maxZoom: 18,
+    // OpenFreeMap's glyph server at tiles.openfreemap.org/fonts/ returns 404.
+    // Redirect glyph requests to the MapLibre demo tiles font CDN instead.
+    transformRequest: (url, resourceType) => {
+      if (resourceType === 'Glyphs' && url.startsWith('https://tiles.openfreemap.org/fonts/')) {
+        return { url: url.replace('https://tiles.openfreemap.org/fonts/', 'https://demotiles.maplibre.org/font/') }
+      }
+    },
   })
 
   map.addControl(new maplibregl.NavigationControl(), 'top-right')
@@ -109,6 +116,11 @@ function setupSources() {
 function setupLayers() {
   if (!map) return
 
+  // Find the first symbol layer in the basemap style so we can insert our
+  // choropleth fill BEFORE it. This puts the heatmap above land/water fill
+  // but underneath text labels and road symbols.
+  const firstSymbolId = map.getStyle().layers.find(l => l.type === 'symbol')?.id
+
   // Layer 2: Choropleth fill — score-driven colour from Martin MVT tiles
   map.addLayer({
     id: 'tiles-fill',
@@ -117,9 +129,9 @@ function setupLayers() {
     'source-layer': 'tile_heatmap',
     paint: {
       'fill-color': buildColorExpression(),
-      'fill-opacity': 0.65,
+      'fill-opacity': 0.7,
     },
-  })
+  }, firstSymbolId)
 
   // Layer 3: Tile grid borders — subtle white lines between tiles
   map.addLayer({
@@ -129,10 +141,10 @@ function setupLayers() {
     'source-layer': 'tile_heatmap',
     paint: {
       'line-color': '#ffffff',
-      'line-opacity': 0.3,
-      'line-width': 1,
+      'line-opacity': 0.25,
+      'line-width': 0.5,
     },
-  })
+  }, firstSymbolId)
 
   // Layer 4: Clustered pin circles — visible when multiple pins overlap at low zoom
   // filter: ['has', 'point_count'] means "only show features that MapLibre has clustered"
@@ -293,7 +305,7 @@ function setupInteractions() {
   // We use 'in' to safely check for the property before accessing it — this
   // narrows the type and avoids an unsafe 'any' cast.
   map.on('error', (e) => {
-    if ('sourceId' in e && e.sourceId === 'tiles-mvt') {
+    if ('sourceId' in e && (e as any).sourceId === 'tiles-mvt') {
       tileError.value = true
       setTimeout(() => { tileError.value = false }, 5000)
     }
@@ -314,8 +326,13 @@ function buildColorExpression(): maplibregl.ExpressionSpecification {
   // coalesce provides a fallback of 0 if 'value' is missing (e.g. tile has no score data).
   // flatMap converts [[0,'#aaa'],[50,'#bbb'],[100,'#ccc']] → [0,'#aaa',50,'#bbb',100,'#ccc']
   // which is the format MapLibre expects: stop, color, stop, color, ...
+  // to-number converts 'value' to a number and returns the fallback (0) if
+  // the property is missing or null — handles tiles with no score data.
+  // Preferred over coalesce here because to-number resolves to type 'number'
+  // at compile time; coalesce(get(...), 0) resolves to 'value' (any) in
+  // MapLibre v4's type system and causes a runtime null error in interpolate.
   return [
-    'interpolate', ['linear'], ['coalesce', ['get', 'value'], 0],
+    'interpolate', ['linear'], ['to-number', ['get', 'value'], 0],
     ...ramp.stops.flatMap(([stop, color]) => [stop, color]),
   ] as maplibregl.ExpressionSpecification
 }
