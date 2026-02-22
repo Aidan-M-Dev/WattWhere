@@ -38,26 +38,43 @@
     <!-- Map Legend: positioned bottom-left inside map viewport -->
     <MapLegend class="map-legend" />
 
+    <!-- Landmark toggle button — top-left, below nav controls -->
+    <button
+      class="pins-toggle"
+      :class="{ 'pins-toggle--active': pinsVisible }"
+      @click="pinsVisible = !pinsVisible"
+      :title="pinsVisible ? 'Hide landmarks' : 'Show landmarks'"
+    >
+      <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/>
+        <circle cx="12" cy="10" r="3"/>
+      </svg>
+      <span>{{ pinsVisible ? 'Landmarks on' : 'Landmarks off' }}</span>
+    </button>
+
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted, onUnmounted, computed } from 'vue'
+import { ref, watch, onMounted, onUnmounted } from 'vue'
 import maplibregl from 'maplibre-gl'
 import { useSuitabilityStore } from '@/stores/suitability'
 import { useToast } from '@/composables/useToast'
-import { COLOR_RAMPS, TEMPERATURE_RAMP } from '@/types'
+import { COLOR_RAMPS } from '@/types'
 import type { CustomMetric } from '@/types'
 import MapLegend from '@/components/MapLegend.vue'
 import irelandCounties from '@/assets/ireland-counties.json'
+import { buildPinSvg, loadSvgAsImage, ALL_PIN_TYPES } from '@/utils/pinIcons'
 
 const store = useSuitabilityStore()
 const { push: pushToast } = useToast()
 
 const mapEl = ref<HTMLDivElement | null>(null)
+const pinsVisible = ref(true)
 let map: maplibregl.Map | null = null
 let hoveredTileId: number | null = null
 let customSourceIds: string[] = []
+let hoverPopup: maplibregl.Popup | null = null
 
 // Ireland's bounding box (WGS84). Used for the soft viewport pull-back.
 const IRELAND_BBOX = { west: -10.7, east: -5.8, south: 51.2, north: 55.6 }
@@ -95,8 +112,9 @@ onMounted(() => {
   map.addControl(new maplibregl.NavigationControl(), 'top-right')
   map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-right')
 
-  map.on('load', () => {
+  map.on('load', async () => {
     setupSources()
+    await loadPinIcons()
     setupLayers()
     setupInteractions()
   })
@@ -217,47 +235,19 @@ function setupLayers() {
     },
   })
 
-  // Layer 6: Unclustered individual pins — visible at higher zoom levels
-  // filter: ['!', ['has', 'point_count']] means "not a cluster, a real single pin"
-  // Colour varies by pin type using a match expression
+  // Layer 6: Unclustered individual pins — SVG symbol icons loaded by loadPinIcons()
+  // icon-image looks up the pre-loaded image by pin type key (e.g. 'wind_farm')
   map.addLayer({
     id: 'pins-unclustered',
-    type: 'circle',
+    type: 'symbol',
     source: 'pins',
     filter: ['!', ['has', 'point_count']],
-    paint: {
-      'circle-radius': 6,
-      'circle-color': [
-        'match', ['get', 'type'],
-        // overall sort pins
-        'data_centre', '#ff6b6b',
-        'ida_site', '#ffd93d',
-        // energy sort pins
-        'wind_farm', '#74c476',
-        'transmission_node', '#fd8d3c',
-        'substation', '#e6550d',
-        // environment sort pins
-        'sac', '#d73027',
-        'spa', '#fc8d59',
-        'nha', '#fee08b',
-        'pnha', '#d9ef8b',
-        'flood_zone', '#4575b4',
-        // cooling sort pins
-        'hydrometric_station', '#6baed6',
-        'waterbody', '#08519c',
-        'met_station', '#9ecae1',
-        // connectivity sort pins
-        'internet_exchange', '#9e9ac8',
-        'motorway_junction', '#bcbddc',
-        'broadband_area', '#dadaeb',
-        // planning sort pins
-        'zoning_parcel', '#fd8d3c',
-        'planning_application', '#fdae6b',
-        // fallback colour for any unrecognised type
-        '#cccccc',
-      ] as maplibregl.ExpressionSpecification,
-      'circle-stroke-width': 1,
-      'circle-stroke-color': '#ffffff',
+    layout: {
+      'icon-image': ['get', 'type'],
+      'icon-size': 1,
+      'icon-allow-overlap': true,
+      'icon-ignore-placement': true,
+      'icon-optional': true,
     },
   })
 
@@ -312,11 +302,12 @@ function setupInteractions() {
     map!.setFilter('tiles-hover', ['==', ['get', 'tile_id'], -1])
   })
 
-  // Click: tile selection
+  // Click: tile selection (skip if user clicked a pin)
   map.on('click', 'tiles-fill', async (e) => {
     if (!e.features?.length) return
     const tileId = e.features[0].properties?.tile_id as number
     if (!tileId) return
+    if (map!.queryRenderedFeatures(e.point, { layers: ['pins-unclustered'] }).length) return
 
     // Update selected tile filter
     map!.setFilter('tiles-selected', ['==', ['get', 'tile_id'], tileId])
@@ -387,6 +378,47 @@ function setupInteractions() {
     if (store.activeSort === 'custom' && store.customMetricsApplied.length) {
       computeCustomBlend()
     }
+  })
+
+  // ── Pin interactions ──────────────────────────────────────────
+
+  // Hover popup: appears on mouseenter, removed on mouseleave
+  map.on('mouseenter', 'pins-unclustered', (e) => {
+    if (!e.features?.length) return
+    map!.getCanvas().style.cursor = 'pointer'
+    const props = e.features[0].properties as Record<string, unknown>
+    const coords = (e.features[0].geometry as GeoJSON.Point).coordinates as [number, number]
+
+    hoverPopup?.remove()
+    const name = escapeHtml(String(props.name ?? 'Unknown'))
+    const type = escapeHtml(String(props.type ?? '').replace(/_/g, ' '))
+    const extra = buildPopupExtra(props)
+
+    hoverPopup = new maplibregl.Popup({ closeButton: false, closeOnClick: false, maxWidth: '220px', offset: 16 })
+      .setLngLat(coords)
+      .setHTML(`<div class="pin-popup"><strong>${name}</strong><div class="pin-popup__type">${type}</div>${extra}</div>`)
+      .addTo(map!)
+  })
+
+  map.on('mouseleave', 'pins-unclustered', () => {
+    map!.getCanvas().style.cursor = ''
+    hoverPopup?.remove()
+    hoverPopup = null
+  })
+
+  // Cluster cursor + expand-on-click
+  map.on('mouseenter', 'pins-clusters', () => { map!.getCanvas().style.cursor = 'pointer' })
+  map.on('mouseleave', 'pins-clusters', () => { map!.getCanvas().style.cursor = '' })
+
+  map.on('click', 'pins-clusters', async (e) => {
+    if (!e.features?.length) return
+    const clusterId = e.features[0].properties?.cluster_id
+    const source = map!.getSource('pins') as maplibregl.GeoJSONSource
+    try {
+      const zoom = await source.getClusterExpansionZoom(clusterId)
+      const coords = (e.features[0].geometry as GeoJSON.Point).coordinates as [number, number]
+      map!.easeTo({ center: coords, zoom })
+    } catch { /* cluster gone before click resolved */ }
   })
 }
 
@@ -526,6 +558,40 @@ function getCustomTileScores(tileId: number): Map<string, number> {
   return scores
 }
 
+// ── Pin icon loading ──────────────────────────────────────────
+
+async function loadPinIcons() {
+  if (!map) return
+  const SIZE = 32
+  await Promise.all(
+    ALL_PIN_TYPES.map(async (type) => {
+      try {
+        const svg = buildPinSvg(type, SIZE)
+        const img = await loadSvgAsImage(svg, SIZE)
+        if (!map!.hasImage(type)) map!.addImage(type, img)
+      } catch (err) {
+        console.warn(`[pins] Failed to load icon for "${type}"`, err)
+      }
+    })
+  )
+}
+
+// ── Popup helpers ─────────────────────────────────────────────
+
+function escapeHtml(str: string): string {
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+}
+
+function buildPopupExtra(props: Record<string, unknown>): string {
+  const lines: string[] = []
+  if (typeof props.capacity_mw === 'number') lines.push(`${props.capacity_mw} MW`)
+  if (typeof props.voltage_kv === 'number')  lines.push(`${props.voltage_kv} kV`)
+  if (typeof props.mean_flow_m3s === 'number') lines.push(`${props.mean_flow_m3s.toFixed(2)} m³/s`)
+  if (typeof props.broadband_tier === 'string') lines.push(escapeHtml(props.broadband_tier))
+  if (!lines.length) return ''
+  return `<div class="pin-popup__metric">${lines.join(' · ')}</div>`
+}
+
 // ── Reactive watchers ─────────────────────────────────────────
 
 // When martinTileUrl changes (sort or metric switch), tell the tile source to fetch new tiles.
@@ -581,6 +647,16 @@ watch(() => store.sidebarOpen, (isOpen) => {
     map.easeTo({ padding: { left: 0, top: 0, bottom: 0, right: 0 }, duration: 300 })
   }
 })
+
+// Toggle pin layer visibility
+watch(pinsVisible, (visible) => {
+  if (!map?.isStyleLoaded()) return
+  const vis = visible ? 'visible' : 'none'
+  map.setLayoutProperty('pins-clusters',    'visibility', vis)
+  map.setLayoutProperty('pins-labels',      'visibility', vis)
+  map.setLayoutProperty('pins-unclustered', 'visibility', vis)
+  if (!visible) { hoverPopup?.remove(); hoverPopup = null }
+})
 </script>
 
 <style scoped>
@@ -623,6 +699,37 @@ watch(() => store.sidebarOpen, (isOpen) => {
   bottom: 36px;  /* above MapLibre attribution bar */
   left: 12px;
   z-index: 20;
+}
+
+/* ── Landmark toggle button ─────────────────────────────────── */
+.pins-toggle {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: rgba(30, 27, 27, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  backdrop-filter: blur(4px);
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.pins-toggle:hover {
+  color: rgba(255, 255, 255, 0.85);
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.pins-toggle--active {
+  color: rgba(255, 255, 255, 0.85);
+  border-color: rgba(255, 255, 255, 0.2);
 }
 
 </style>

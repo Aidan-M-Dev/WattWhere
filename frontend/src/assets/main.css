@@ -29,3 +29,38 @@
     transparent 18px
   );
 }
+
+/* ── Pin hover popup (MapLibre popup — not scoped) ────────────── */
+.maplibregl-popup-content {
+  background: rgba(22, 20, 20, 0.95);
+  color: #e0e0e0;
+  border-radius: 8px;
+  padding: 10px 13px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.maplibregl-popup-tip {
+  border-top-color: rgba(22, 20, 20, 0.95) !important;
+  border-bottom-color: rgba(22, 20, 20, 0.95) !important;
+}
+
+.pin-popup strong {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: #ffffff;
+  margin-bottom: 2px;
+}
+
+.pin-popup__type {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.45);
+  text-transform: capitalize;
+}
+
+.pin-popup__metric {
+  font-size: 11px;
+  color: #8ab4d4;
+  margin-top: 5px;
+}
