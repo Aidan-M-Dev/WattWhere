@@ -22,15 +22,18 @@ by Martin (MVT). Do NOT add geometry/GeoJSON tile endpoints to this API.
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi_cache import FastAPICache
+from fastapi_cache.backends.inmemory import InMemoryBackend
 
 from db import init_pool, close_pool
-from routes import sorts, pins, tile, metric_range, weights
+from routes import sorts, pins, tile, metric_range, weights, admin
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Init DB pool on startup, close on shutdown."""
     await init_pool()
+    FastAPICache.init(InMemoryBackend())
     yield
     await close_pool()
 
@@ -52,7 +55,7 @@ app.add_middleware(
         "http://frontend:5173",
     ],
     allow_credentials=False,
-    allow_methods=["GET", "PUT"],
+    allow_methods=["GET", "PUT", "POST"],
     allow_headers=["*"],
 )
 
@@ -62,6 +65,7 @@ app.include_router(pins.router,          prefix="/api")
 app.include_router(tile.router,          prefix="/api")
 app.include_router(metric_range.router,  prefix="/api")
 app.include_router(weights.router,       prefix="/api")
+app.include_router(admin.router,         prefix="/api")
 
 
 @app.get("/health")

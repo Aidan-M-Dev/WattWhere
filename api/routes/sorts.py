@@ -33,6 +33,7 @@ Implementation notes:
 """
 
 from fastapi import APIRouter, Depends
+from fastapi_cache.decorator import cache
 from pydantic import BaseModel
 import asyncpg
 from db import get_conn
@@ -142,6 +143,7 @@ SORTS_METADATA: list[SortMeta] = [
 # ── Endpoint ─────────────────────────────────────────────────
 
 @router.get("/sorts", response_model=list[SortMeta])
+@cache(expire=3600)
 async def get_sorts(conn: asyncpg.Connection = Depends(get_conn)):
     """
     Return all sort + sub-metric metadata.

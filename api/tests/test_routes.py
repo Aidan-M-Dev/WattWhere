@@ -21,6 +21,8 @@ os.environ.setdefault("ADMIN_KEY", "testkey")
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from db import get_conn  # noqa: E402 — must come after sys.path insert
+from fastapi_cache import FastAPICache  # noqa: E402
+from fastapi_cache.backends.inmemory import InMemoryBackend  # noqa: E402
 from main import app  # noqa: E402
 
 
@@ -54,6 +56,7 @@ async def client(mock_conn: AsyncMock):
         patch("db.init_pool", new_callable=AsyncMock),
         patch("db.close_pool", new_callable=AsyncMock),
     ):
+        FastAPICache.init(InMemoryBackend())
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
         ) as ac:
@@ -252,3 +255,25 @@ async def test_weights_put_with_correct_key_returns_200(client, mock_conn):
     data = r.json()
     total = sum(data[k] for k in ["energy", "connectivity", "environment", "cooling", "planning"])
     assert abs(total - 1.0) < 0.001
+
+
+async def test_sorts_cached_response_is_identical(client):
+    r1 = await client.get("/api/sorts")
+    r2 = await client.get("/api/sorts")
+    assert r1.status_code == 200
+    assert r2.status_code == 200
+    assert r1.json() == r2.json()
+
+
+async def test_admin_invalidate_cache_without_key_returns_401(client):
+    r = await client.post("/api/admin/invalidate-cache")
+    assert r.status_code == 401
+
+
+async def test_admin_invalidate_cache_with_correct_key_returns_200(client):
+    r = await client.post(
+        "/api/admin/invalidate-cache",
+        headers={"X-Admin-Key": "testkey"},
+    )
+    assert r.status_code == 200
+    assert r.json() == {"status": "cache cleared"}

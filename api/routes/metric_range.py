@@ -18,6 +18,7 @@ Response is cached (metric_ranges updated only by pipeline runs).
 """
 
 from fastapi import APIRouter, Depends, Query, HTTPException
+from fastapi_cache.decorator import cache
 from typing import Literal
 from pydantic import BaseModel
 import asyncpg
@@ -42,6 +43,7 @@ VALID_RAW_METRICS: set[tuple[str, str]] = {
 
 
 @router.get("/metric-range", response_model=MetricRangeResponse)
+@cache(expire=1800)
 async def get_metric_range(
     sort: str = Query(..., description="Sort key (e.g. 'energy')"),
     metric: str = Query(..., description="Metric key (e.g. 'wind_speed_100m')"),

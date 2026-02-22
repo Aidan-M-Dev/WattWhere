@@ -24,6 +24,7 @@ Pin types per sort (ARCHITECTURE.md §5):
 """
 
 from fastapi import APIRouter, Depends, Query, HTTPException
+from fastapi_cache.decorator import cache
 from typing import Literal
 import asyncpg
 import json
@@ -35,6 +36,7 @@ SortType = Literal["overall", "energy", "environment", "cooling", "connectivity"
 
 
 @router.get("/pins")
+@cache(expire=600)
 async def get_pins(
     sort: SortType = Query(..., description="Active sort key"),
     conn: asyncpg.Connection = Depends(get_conn),
