@@ -1168,6 +1168,34 @@ def write_land_price_metric_ranges(scores_df: pd.DataFrame, engine: sqlalchemy.E
     print(f"  Metric range written: avg_price_per_sqm_eur [{min_val:.0f}–{max_val:.0f} €/m²]")
 
 
+def write_population_density_metric_ranges(scores_df: pd.DataFrame, engine: sqlalchemy.Engine) -> None:
+    """Write min/max for population_density to metric_ranges.
+    Keyed as (overall, population_density) to match the tile_heatmap CASE branch."""
+    pop_vals = scores_df["population_density_per_km2"].dropna()
+    if len(pop_vals) == 0:
+        print("  No population density data — skipping metric_ranges write")
+        return
+
+    min_val = float(pop_vals.min())
+    max_val = float(pop_vals.max())
+
+    with engine.begin() as conn:
+        conn.execute(
+            text("""
+                INSERT INTO metric_ranges (sort, metric, min_val, max_val, unit)
+                VALUES (:sort, :metric, :min_val, :max_val, :unit)
+                ON CONFLICT (sort, metric) DO UPDATE SET
+                    min_val    = EXCLUDED.min_val,
+                    max_val    = EXCLUDED.max_val,
+                    unit       = EXCLUDED.unit,
+                    updated_at = now()
+            """),
+            {"sort": "overall", "metric": "population_density",
+             "min_val": min_val, "max_val": max_val, "unit": "/km²"},
+        )
+    print(f"  Metric range written: population_density [{min_val:.1f}–{max_val:.1f} /km²]")
+
+
 def main():
     """
     Planning ingest pipeline:
@@ -1280,9 +1308,10 @@ def main():
     n_pins = upsert_pins_planning(zoning, applications, engine)
     print(f"  Inserted {n_pins} planning pins")
 
-    # ── Write metric_ranges for land pricing ──────────────────────────────
+    # ── Write metric_ranges for land pricing + population density ─────────
     print("\n[11/11] Writing metric ranges...")
     write_land_price_metric_ranges(scores_df, engine)
+    write_population_density_metric_ranges(scores_df, engine)
 
     print("\n" + "=" * 60)
     print(f"Planning ingest complete: {n} tiles scored, {n_apps} applications, {n_pins} pins")

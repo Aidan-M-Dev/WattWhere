@@ -55,7 +55,7 @@
           stroke-linecap="round"
         />
       </svg>
-      <span class="sidebar__ring-value">{{ (tileBase?.score ?? 0).toFixed(0) }}<span class="sidebar__ring-pct">%</span></span>
+      <span class="sidebar__ring-value">{{ (tileBase?.score ?? 0).toFixed(0) }}<span class="sidebar__ring-pct">/100</span></span>
     </div>
 
     <!-- Body: Loading skeleton -->
