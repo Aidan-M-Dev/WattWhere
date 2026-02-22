@@ -119,13 +119,19 @@ def load_ireland_boundary() -> gpd.GeoDataFrame:
     if IRELAND_BOUNDARY_FILE.exists():
         print(f"  Loading boundary from {IRELAND_BOUNDARY_FILE}")
         gdf = gpd.read_file(IRELAND_BOUNDARY_FILE)
-        return gdf[["geometry"]].to_crs(GRID_CRS_ITM)
+        gdf = gdf[["geometry"]].to_crs(GRID_CRS_ITM)
+    else:
+        print(f"  Boundary file not found at {IRELAND_BOUNDARY_FILE}")
+        print("  Using hard-coded Option B polygon (±20 km accuracy — OK for synthetic data)")
+        poly = Polygon(IRELAND_POLYGON_WGS84)
+        gdf = gpd.GeoDataFrame({"geometry": [poly]}, crs=GRID_CRS_WGS84)
+        gdf = gdf.to_crs(GRID_CRS_ITM)
 
-    print(f"  Boundary file not found at {IRELAND_BOUNDARY_FILE}")
-    print("  Using hard-coded Option B polygon (±20 km accuracy — OK for synthetic data)")
-    poly = Polygon(IRELAND_POLYGON_WGS84)
-    gdf = gpd.GeoDataFrame({"geometry": [poly]}, crs=GRID_CRS_WGS84)
-    return gdf.to_crs(GRID_CRS_ITM)
+    # Simplify boundary — 500m tolerance in ITM is invisible at 5 km tile scale
+    # but massively reduces vertex count (GADM coastlines have 50k+ vertices).
+    # make_valid() fixes self-intersections that simplify() can introduce.
+    gdf["geometry"] = shapely.make_valid(gdf.geometry.simplify(500).values)
+    return gdf
 
 
 def generate_grid_itm(boundary_gdf: gpd.GeoDataFrame, tile_size_m: int) -> gpd.GeoDataFrame:
@@ -160,6 +166,8 @@ def generate_grid_itm(boundary_gdf: gpd.GeoDataFrame, tile_size_m: int) -> gpd.G
     cy_flat = cy_grid.flatten()
 
     # Vectorised within-boundary check using shapely 2.x
+    # prepare() builds an STRtree index — huge speedup for complex boundaries
+    shapely.prepare(boundary_union)
     pts = shapely.points(cx_flat, cy_flat)
     within_mask = shapely.within(pts, boundary_union)
     within_idx = np.where(within_mask)[0]
@@ -238,6 +246,8 @@ def assign_counties(grid_gdf: gpd.GeoDataFrame, engine: sqlalchemy.Engine) -> gp
     if IRELAND_COUNTIES_FILE.exists():
         print(f"  Using county boundary file: {IRELAND_COUNTIES_FILE}")
         counties = gpd.read_file(IRELAND_COUNTIES_FILE).to_crs(GRID_CRS_WGS84)
+        # Simplify county boundaries — 0.005° ≈ 500m, fine for 5 km tiles
+        counties["geometry"] = shapely.make_valid(counties.geometry.simplify(0.005).values)
 
         # Identify the county name column (OSi: COUNTY/COUNTY_NAME; GADM: NAME_1)
         name_col_candidates = [
