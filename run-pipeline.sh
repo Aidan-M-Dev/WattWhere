@@ -12,6 +12,8 @@ set -euo pipefail
 #   ./run-pipeline.sh --only cooling --skip-download  # re-run cooling ingest only
 #   ./run-pipeline.sh --from ingest    # skip schema + grid + downloads, run all ingests
 
+export MSYS_NO_PATHCONV=1
+
 PIPELINE="docker compose --profile pipeline run --rm pipeline"
 DB_EXEC="docker compose exec -T db psql -U hackeurope -d hackeurope"
 
