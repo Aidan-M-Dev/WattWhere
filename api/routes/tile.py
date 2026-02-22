@@ -12,8 +12,7 @@ How to test:
 Response shape varies per sort — see ARCHITECTURE.md §5 sidebar specs.
 Each response always includes: tile_id, county, grid_ref, centroid, score.
 
-Note: GET /api/tile/{tile_id}/all is deferred (ARCHITECTURE.md §11 D5).
-      Do NOT implement it.
+GET /api/tile/{tile_id}/all returns all 6 sorts for a single tile (P2-08).
 """
 
 from fastapi import APIRouter, Depends, Query, HTTPException, Path
@@ -68,6 +67,51 @@ async def get_tile(
         return await _get_planning(conn, tile_id, base)
     else:
         raise HTTPException(status_code=400, detail=f"Unknown sort: {sort}")
+
+
+@router.get("/tile/{tile_id}/all")
+async def get_tile_all(
+    tile_id: int = Path(..., description="Tile primary key"),
+    conn: asyncpg.Connection = Depends(get_conn),
+) -> dict[str, Any]:
+    """Return data from all 6 sorts for a single tile in one response."""
+    tile_row = await conn.fetchrow(
+        "SELECT tile_id, county, grid_ref, ST_X(centroid) AS lng, ST_Y(centroid) AS lat FROM tiles WHERE tile_id = $1",
+        tile_id,
+    )
+    if not tile_row:
+        raise HTTPException(status_code=404, detail=f"Tile {tile_id} not found")
+
+    base = {
+        "tile_id": tile_row["tile_id"],
+        "county": tile_row["county"],
+        "grid_ref": tile_row["grid_ref"],
+        "centroid": [tile_row["lng"], tile_row["lat"]],
+    }
+
+    dispatch = {
+        "overall": _get_overall,
+        "energy": _get_energy,
+        "environment": _get_environment,
+        "cooling": _get_cooling,
+        "connectivity": _get_connectivity,
+        "planning": _get_planning,
+    }
+
+    results = {}
+    for sort_key, fn in dispatch.items():
+        try:
+            results[sort_key] = await fn(conn, tile_id, base)
+        except HTTPException as e:
+            if e.status_code == 404:
+                results[sort_key] = None
+            else:
+                raise
+
+    if all(v is None for v in results.values()):
+        raise HTTPException(status_code=404, detail="Tile not found in any sort table")
+
+    return results
 
 
 async def _get_overall(conn: asyncpg.Connection, tile_id: int, base: dict) -> dict:

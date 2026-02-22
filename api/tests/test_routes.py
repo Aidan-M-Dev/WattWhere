@@ -265,6 +265,83 @@ async def test_sorts_cached_response_is_identical(client):
     assert r1.json() == r2.json()
 
 
+async def test_tile_all_returns_all_sorts(client, mock_conn):
+    tile_row = fr(tile_id=1, county="Dublin", grid_ref="R001C001", lng=-6.26, lat=53.33)
+    overall_row = fr(
+        score=Decimal("75.50"),
+        energy_score=Decimal("80.00"), environment_score=Decimal("70.00"),
+        cooling_score=Decimal("65.00"), connectivity_score=Decimal("85.00"),
+        planning_score=Decimal("78.00"), has_hard_exclusion=False,
+        exclusion_reason=None, nearest_data_centre_km=Decimal("12.345"),
+        energy=Decimal("0.25"), connectivity=Decimal("0.25"),
+        environment=Decimal("0.20"), cooling=Decimal("0.15"), planning=Decimal("0.15"),
+    )
+    energy_row = fr(
+        score=Decimal("88.00"), wind_speed_50m=Decimal("7.2"),
+        wind_speed_100m=Decimal("8.5"), wind_speed_150m=Decimal("9.1"),
+        solar_ghi=Decimal("1050.0"), grid_proximity=Decimal("72.0"),
+        nearest_transmission_line_km=Decimal("3.2"), nearest_substation_km=Decimal("5.1"),
+        nearest_substation_name="Castlebar 110kV", nearest_substation_voltage="110kV",
+        grid_low_confidence=False,
+    )
+    env_row = fr(
+        score=Decimal("45.00"), designation_overlap=Decimal("30.00"),
+        flood_risk=Decimal("70.00"), landslide_risk=Decimal("80.00"),
+        has_hard_exclusion=False, exclusion_reason=None,
+        intersects_sac=False, intersects_spa=False, intersects_nha=False,
+        intersects_pnha=False, intersects_current_flood=False,
+        intersects_future_flood=False, landslide_susceptibility="low",
+    )
+    cooling_row = fr(
+        score=Decimal("60.00"), temperature=Decimal("10.5"),
+        water_proximity=Decimal("65.0"), rainfall=Decimal("1100.0"),
+        aquifer_productivity=Decimal("50.0"), free_cooling_hours=Decimal("4500"),
+        nearest_waterbody_name="River Liffey", nearest_waterbody_km=Decimal("2.1"),
+        nearest_hydrometric_station_name="Islandbridge", nearest_hydrometric_flow_m3s=Decimal("15.3"),
+        aquifer_productivity_rating="Moderate",
+    )
+    conn_row = fr(
+        score=Decimal("82.00"), broadband=Decimal("90.0"),
+        ix_distance=Decimal("75.0"), road_access=Decimal("80.0"),
+        inex_dublin_km=Decimal("5.0"), inex_cork_km=Decimal("220.0"),
+        broadband_tier="NGA", nearest_motorway_junction_km=Decimal("3.5"),
+        nearest_motorway_junction_name="J7 Naas North",
+        nearest_national_road_km=Decimal("1.2"), nearest_rail_freight_km=Decimal("8.0"),
+    )
+    planning_row = fr(
+        score=Decimal("70.00"), zoning_tier=Decimal("80.0"),
+        planning_precedent=Decimal("60.0"), pct_industrial=Decimal("25.0"),
+        pct_enterprise=Decimal("15.0"), pct_mixed_use=Decimal("10.0"),
+        pct_agricultural=Decimal("30.0"), pct_residential=Decimal("15.0"),
+        pct_other=Decimal("5.0"), nearest_ida_site_km=Decimal("4.0"),
+        population_density_per_km2=Decimal("350.0"), county_dev_plan_ref="DCC-2022",
+    )
+
+    # fetchrow calls: tile_base, overall, energy, env, cooling, connectivity, planning
+    mock_conn.fetchrow.side_effect = [
+        tile_row, overall_row, energy_row, env_row, cooling_row, conn_row, planning_row,
+    ]
+    # fetch calls: environment designations, planning applications
+    mock_conn.fetch.side_effect = [[], []]
+
+    r = await client.get("/api/tile/1/all")
+    assert r.status_code == 200
+    data = r.json()
+    assert set(data.keys()) == {
+        "overall", "energy", "environment", "cooling", "connectivity", "planning",
+    }
+    assert data["overall"]["tile_id"] == 1
+    assert data["energy"]["wind_speed_100m"] == 8.5
+    assert data["planning"]["score"] == 70.0
+
+
+async def test_tile_all_not_found(client, mock_conn):
+    mock_conn.fetchrow.return_value = None
+
+    r = await client.get("/api/tile/99999/all")
+    assert r.status_code == 404
+
+
 async def test_admin_invalidate_cache_without_key_returns_401(client):
     r = await client.post("/api/admin/invalidate-cache")
     assert r.status_code == 401
