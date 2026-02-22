@@ -39,6 +39,14 @@ Deployment (after frontend is polished):
     P2-16 Production Docker build
     P2-17 Martin cache invalidation
     P2-18 IDA sites data entry
+
+Data & Metrics:
+    P2-20 Real estate / land pricing   ──► integrates into Planning sort
+    P2-22 Metric reorganisation         ──► moves metrics between sorts, re-run all pipelines
+    P2-23 Renewable energy penetration  ──► new sub-metric in Energy sort
+
+Frontend (requires pipeline data):
+    P2-21 Custom combination builder    ──► depends on P2-08 (/api/tile/{id}/all)
 ```
 
 P2-01 through P2-05 are independent of each other and can run in parallel once
