@@ -51,6 +51,7 @@ services:
     environment:
       DATABASE_URL: postgresql://hackeurope:${DB_PASSWORD}@db:5432/hackeurope
       ADMIN_KEY: ${ADMIN_KEY}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
     ports:
       - "${API_PORT:-8000}:8000"
     depends_on:

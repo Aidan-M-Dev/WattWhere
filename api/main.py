@@ -26,7 +26,7 @@ from fastapi_cache import FastAPICache
 from fastapi_cache.backends.inmemory import InMemoryBackend
 
 from db import init_pool, close_pool
-from routes import sorts, pins, tile, metric_range, weights, admin
+from routes import sorts, pins, tile, metric_range, weights, admin, summary
 
 
 @asynccontextmanager
@@ -66,6 +66,7 @@ app.include_router(tile.router,          prefix="/api")
 app.include_router(metric_range.router,  prefix="/api")
 app.include_router(weights.router,       prefix="/api")
 app.include_router(admin.router,         prefix="/api")
+app.include_router(summary.router,       prefix="/api")
 
 
 @app.get("/health")

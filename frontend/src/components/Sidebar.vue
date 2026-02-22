@@ -107,13 +107,26 @@
         key="custom"
         :data="(store.selectedTileData as Record<string, any>)"
       />
+
+      <!-- AI Summary -->
+      <div class="sidebar__summary" v-if="store.activeSort !== 'custom'">
+        <button
+          class="summary-btn"
+          :disabled="summaryLoading"
+          @click="fetchSummary"
+        >
+          <Sparkles :size="16" />
+          {{ summaryLoading ? 'Generating\u2026' : 'AI Summary' }}
+        </button>
+        <p class="summary-text" v-if="summaryText">{{ summaryText }}</p>
+      </div>
     </div>
   </aside>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onMounted, onUnmounted } from 'vue'
-import { X, AlertCircle } from 'lucide-vue-next'
+import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
+import { X, AlertCircle, Sparkles } from 'lucide-vue-next'
 import { useSuitabilityStore } from '@/stores/suitability'
 import type {
   TileBase, TileOverall, TileEnergy, TileEnvironment,
@@ -145,6 +158,34 @@ const tileBase = computed((): TileBase | null => {
   }
   return store.selectedTileData as TileBase | null
 })
+
+// ── AI Summary ──────────────────────────────────────────────────
+const summaryText = ref<string | null>(null)
+const summaryLoading = ref(false)
+
+// Clear summary when tile or sort changes
+watch(
+  () => [store.selectedTileId, store.activeSort],
+  () => { summaryText.value = null },
+)
+
+async function fetchSummary() {
+  if (!store.selectedTileId || store.activeSort === 'custom') return
+  summaryLoading.value = true
+  summaryText.value = null
+  try {
+    const res = await fetch(`/api/tile/${store.selectedTileId}/summary?sort=${store.activeSort}`, {
+      method: 'POST',
+    })
+    if (!res.ok) throw new Error(`Summary request failed (${res.status})`)
+    const data = await res.json()
+    summaryText.value = data.summary
+  } catch (err) {
+    summaryText.value = 'Failed to generate summary. Please try again.'
+  } finally {
+    summaryLoading.value = false
+  }
+}
 
 // ── Actions ────────────────────────────────────────────────────
 async function retry() {
@@ -313,5 +354,43 @@ async function retry() {
 
 .retry-btn:hover {
   background: rgba(255, 255, 255, 0.1);
+}
+
+/* AI Summary */
+.sidebar__summary {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--color-border);
+}
+
+.summary-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--color-text);
+  cursor: pointer;
+  font-size: 13px;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.summary-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.35);
+}
+
+.summary-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.summary-text {
+  margin-top: 12px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: rgba(255, 255, 255, 0.8);
 }
 </style>
