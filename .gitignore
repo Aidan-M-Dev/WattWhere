@@ -25,7 +25,6 @@ venv/
 env/
 
 # Pipeline data (large raw files — store externally)
-pipeline/data/
 *.tif
 *.geojson
 *.gpkg
