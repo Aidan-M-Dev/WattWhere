@@ -41,8 +41,9 @@ SYSTEM_PROMPT = (
     "Write exactly 2–3 plain-text sentences summarising the key findings for the given sort category. "
     "Do NOT use markdown, bullet points, or headings.\n\n"
     "Domain guidance per sort category:\n"
-    "- overall: Highlight the composite score, which sub-scores drive it, whether a hard exclusion applies, "
-    "and proximity to existing data centres.\n"
+    "- overall: You receive data from ALL sub-categories. Give a holistic site verdict: highlight the composite "
+    "score, call out the strongest and weakest sub-scores, flag any hard exclusions or deal-breakers "
+    "(e.g. Natura 2000 overlap, poor grid access), and note proximity to existing data centres.\n"
     "- energy: Assess grid connection viability (substation distance/voltage, transmission line proximity), "
     "on-site renewable potential (wind speeds, solar GHI), and the local renewable-vs-fossil generation mix.\n"
     "- environment: Flag any Natura 2000 (SAC/SPA) or NHA overlaps that trigger hard exclusions, "
@@ -83,18 +84,25 @@ async def tile_summary(
         "centroid": [tile_row["lng"], tile_row["lat"]],
     }
 
-    # Reuse the existing _get_* helper for this sort
-    getter = _DISPATCH.get(sort)
-    if not getter:
-        raise HTTPException(status_code=400, detail=f"Unknown sort: {sort}")
-
-    tile_data = await getter(conn, tile_id, base)
+    if sort == "overall":
+        # For overall, fetch all sub-categories so the AI sees full detail
+        tile_data = {}
+        for key, getter in _DISPATCH.items():
+            try:
+                tile_data[key] = await getter(conn, tile_id, base)
+            except HTTPException:
+                tile_data[key] = None
+    else:
+        getter = _DISPATCH.get(sort)
+        if not getter:
+            raise HTTPException(status_code=400, detail=f"Unknown sort: {sort}")
+        tile_data = await getter(conn, tile_id, base)
 
     # Call Claude
     client = anthropic.Anthropic(api_key=api_key)
     message = client.messages.create(
         model="claude-sonnet-4-6",
-        max_tokens=300,
+        max_tokens=500 if sort == "overall" else 300,
         system=SYSTEM_PROMPT,
         messages=[
             {
