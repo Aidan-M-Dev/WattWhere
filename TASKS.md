@@ -1917,3 +1917,58 @@ print('nearest_ida_site_km:', data.get('nearest_ida_site_km'))
 "
 # Expect: a float distance value (not null) after re-running planning ingest
 ```
+
+---
+
+## AI Features
+
+---
+
+### P2-19 · AI Executive Summary
+
+**Goal**: Add an "AI Summary" button to the bottom of the sidebar. Clicking it calls a new
+`POST /api/tile/{tile_id}/summary?sort={sort}` endpoint that passes the tile's existing
+metric data to Claude claude-sonnet-4-6 and returns a 2–3 sentence plain-text executive
+summary scoped to the active sort. Summaries are generated on demand (not on tile load)
+to avoid unnecessary API calls.
+
+#### Dependencies
+
+Add `anthropic>=0.40.0` to `api/requirements.txt`. Set `ANTHROPIC_API_KEY` as an env var
+in the `api` service in `docker-compose.yml` and in `.env.example`.
+
+#### Read first
+- `api/routes/tile.py` — the `_get_*` helpers; the summary endpoint reuses them to fetch tile data
+- `api/main.py` — router registration pattern; also add `"POST"` to CORS `allow_methods`
+- `frontend/src/components/Sidebar.vue` — where to add the button; accesses `store` directly
+
+#### Deliverables
+
+**1. Create `api/routes/summary.py`** — `POST /api/tile/{tile_id}/summary?sort={sort}`.
+Reuse the existing `_get_*` helper for the active sort to fetch tile data, then call
+`claude-sonnet-4-6` with a prompt instructing it to write 2–3 plain-text sentences for a
+non-technical executive audience. Return `{"summary": "<text>"}`.
+
+**2. Register the router in `api/main.py`** — import and `include_router` the new summary
+router following the same pattern as the existing routes. Also add `"POST"` to
+`allow_methods` in the `CORSMiddleware` config (currently only `GET` and `PUT` are listed,
+which would block the frontend fetch).
+
+**3. Add the button to `Sidebar.vue`** — add a `Sparkles`-icon "AI Summary" button at the
+bottom of the `sidebar__body` block (inside the `v-else-if="store.selectedTileData"` div,
+after the sort-specific component). Wire it to `POST /api/tile/{store.selectedTileId}/summary?sort={store.activeSort}`,
+show a "Generating…" disabled state while loading, render the returned text below the button,
+and clear the summary whenever `store.selectedTileId` or `store.activeSort` changes.
+
+#### Tests / acceptance criteria
+
+```bash
+curl -X POST "http://localhost:8000/api/tile/1/summary?sort=energy"
+# Expect: {"summary": "<2-3 sentences, no markdown>"}
+
+cd frontend && npm run type-check
+# Expect: 0 errors
+```
+
+Manual: click a tile → "AI Summary" button visible → click → summary appears; switching
+sort or tile clears the summary immediately.
