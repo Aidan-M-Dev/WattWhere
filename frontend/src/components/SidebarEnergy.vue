@@ -24,7 +24,7 @@
     </div>
 
     <section class="section">
-      <h3 class="section__title">Wind Speed</h3>
+      <h3 class="section__title">Wind Speed <a href="https://globalwindatlas.info" target="_blank" rel="noopener" class="source-link">source ↗</a></h3>
       <div class="kv-row" v-if="data.wind_speed_50m !== null">
         <span class="kv-row__label">At 50m</span>
         <span class="kv-row__value">{{ data.wind_speed_50m?.toFixed(1) }} m/s</span>
@@ -40,7 +40,7 @@
     </section>
 
     <section class="section">
-      <h3 class="section__title">Solar Irradiance</h3>
+      <h3 class="section__title">Solar Irradiance <a href="https://power.larc.nasa.gov" target="_blank" rel="noopener" class="source-link">source ↗</a></h3>
       <div class="kv-row">
         <span class="kv-row__label">GHI</span>
         <span class="kv-row__value">
@@ -50,7 +50,7 @@
     </section>
 
     <section class="section">
-      <h3 class="section__title">Grid Infrastructure</h3>
+      <h3 class="section__title">Grid Infrastructure <a href="https://www.openstreetmap.org" target="_blank" rel="noopener" class="source-link">source ↗</a></h3>
       <div class="kv-row">
         <span class="kv-row__label">Grid proximity score</span>
         <span class="kv-row__value">{{ data.grid_proximity?.toFixed(0) ?? '—' }}</span>
@@ -97,7 +97,9 @@ defineProps<{ data: TileEnergy }>()
 <style scoped>
 .sidebar-energy { display: flex; flex-direction: column; gap: 20px; }
 .warning-banner { display: flex; align-items: center; gap: 6px; background: rgba(253, 141, 60, 0.12); border: 1px solid rgba(253, 141, 60, 0.3); border-radius: 6px; padding: 8px 12px; font-size: 12px; color: #fd8d3c; }
-.section__title { font-size: 11px; font-weight: 600; color: rgba(255,255,255,0.4); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 10px; }
+.section__title { font-size: 11px; font-weight: 600; color: rgba(255,255,255,0.4); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between; }
+.source-link { font-size: 10px; font-weight: 400; color: rgba(255,255,255,0.2); text-decoration: none; text-transform: none; letter-spacing: 0; flex-shrink: 0; }
+.source-link:hover { color: rgba(255,255,255,0.6); }
 .kv-row { display: flex; justify-content: space-between; font-size: 13px; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.06); }
 .kv-row__label { color: rgba(255,255,255,0.5); }
 .kv-row__value { color: white; font-weight: 500; }

@@ -74,26 +74,32 @@
     <div class="sidebar__body" v-else-if="store.selectedTileData">
       <SidebarOverall
         v-if="store.activeSort === 'overall'"
+        key="overall"
         :data="store.selectedTileData as TileOverall"
       />
       <SidebarEnergy
         v-else-if="store.activeSort === 'energy'"
+        key="energy"
         :data="store.selectedTileData as TileEnergy"
       />
       <SidebarEnvironment
         v-else-if="store.activeSort === 'environment'"
+        key="environment"
         :data="store.selectedTileData as TileEnvironment"
       />
       <SidebarCooling
         v-else-if="store.activeSort === 'cooling'"
+        key="cooling"
         :data="store.selectedTileData as TileCooling"
       />
       <SidebarConnectivity
         v-else-if="store.activeSort === 'connectivity'"
+        key="connectivity"
         :data="store.selectedTileData as TileConnectivity"
       />
       <SidebarPlanning
         v-else-if="store.activeSort === 'planning'"
+        key="planning"
         :data="store.selectedTileData as TilePlanning"
       />
     </div>

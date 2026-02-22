@@ -18,7 +18,7 @@
 <template>
   <div class="sidebar-cooling">
     <section class="section">
-      <h3 class="section__title">Climate</h3>
+      <h3 class="section__title">Climate <a href="https://met.ie/climate/available-data" target="_blank" rel="noopener" class="source-link">source ↗</a></h3>
       <div class="kv-row">
         <span class="kv-row__label">Mean annual temperature</span>
         <span class="kv-row__value">
@@ -41,7 +41,7 @@
     </section>
 
     <section class="section">
-      <h3 class="section__title">Water Resources</h3>
+      <h3 class="section__title">Water Resources <a href="https://gis.epa.ie/GetData/Download" target="_blank" rel="noopener" class="source-link">source ↗</a></h3>
       <div class="kv-row">
         <span class="kv-row__label">Water proximity score</span>
         <span class="kv-row__value">{{ data.water_proximity?.toFixed(0) ?? '—' }}/100</span>
@@ -57,7 +57,7 @@
     </section>
 
     <section class="section">
-      <h3 class="section__title">Hydrometric Station</h3>
+      <h3 class="section__title">Hydrometric Station <a href="https://waterlevel.ie" target="_blank" rel="noopener" class="source-link">source ↗</a></h3>
       <div class="kv-row" v-if="data.nearest_hydrometric_station_name">
         <span class="kv-row__label">Station</span>
         <span class="kv-row__value">{{ data.nearest_hydrometric_station_name }}</span>
@@ -70,7 +70,7 @@
     </section>
 
     <section class="section">
-      <h3 class="section__title">Groundwater</h3>
+      <h3 class="section__title">Groundwater <a href="https://www.gsi.ie/en-ie/data-and-maps/Pages/default.aspx" target="_blank" rel="noopener" class="source-link">source ↗</a></h3>
       <div class="kv-row">
         <span class="kv-row__label">Aquifer productivity</span>
         <span class="kv-row__value">{{ data.aquifer_productivity_rating ?? '—' }}</span>
@@ -91,7 +91,9 @@ defineProps<{ data: TileCooling }>()
 
 <style scoped>
 .sidebar-cooling { display: flex; flex-direction: column; gap: 20px; }
-.section__title { font-size: 11px; font-weight: 600; color: rgba(255,255,255,0.4); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 10px; }
+.section__title { font-size: 11px; font-weight: 600; color: rgba(255,255,255,0.4); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between; }
+.source-link { font-size: 10px; font-weight: 400; color: rgba(255,255,255,0.2); text-decoration: none; text-transform: none; letter-spacing: 0; flex-shrink: 0; }
+.source-link:hover { color: rgba(255,255,255,0.6); }
 .kv-row { display: flex; justify-content: space-between; align-items: center; font-size: 13px; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.06); }
 .kv-row__label { color: rgba(255,255,255,0.5); }
 .kv-row__value { color: white; font-weight: 500; display: flex; align-items: center; gap: 6px; }

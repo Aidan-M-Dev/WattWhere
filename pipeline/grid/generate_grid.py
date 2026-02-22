@@ -37,7 +37,10 @@ from sqlalchemy import text
 from psycopg2.extras import execute_values
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from config import DB_URL, IRELAND_BOUNDARY_FILE, TILE_SIZE_M, GRID_CRS_ITM, GRID_CRS_WGS84
+from config import (
+    DB_URL, IRELAND_BOUNDARY_FILE, IRELAND_COUNTIES_FILE,
+    TILE_SIZE_M, GRID_CRS_ITM, GRID_CRS_WGS84,
+)
 
 # ---------------------------------------------------------------------------
 # Option B: Hard-coded ~25-vertex approximation of the Republic of Ireland
@@ -196,29 +199,93 @@ def reproject_to_wgs84(grid_gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     return reprojected
 
 
-def assign_counties(grid_gdf: gpd.GeoDataFrame, engine: sqlalchemy.Engine) -> gpd.GeoDataFrame:
+def _voronoi_county_assign(grid_gdf: gpd.GeoDataFrame, mask=None) -> list:
     """
-    Assign county name to each tile via nearest-centroid Voronoi partition.
+    Assign county names via nearest-centroid Voronoi (fallback).
 
-    Uses known county centroids (COUNTY_CENTROIDS above) and simple Euclidean
-    distance in WGS84 — acceptable coarse assignment for synthetic data.
-    For production, replace with a PostGIS spatial join against OSi county boundaries.
+    mask: boolean array or None — if given, only assign for True rows.
+    Returns a list of county name strings (length = len(grid_gdf) if mask is
+    None, else len(mask.sum())).
     """
     county_names = list(COUNTY_CENTROIDS.keys())
-    county_coords = np.array(list(COUNTY_CENTROIDS.values()))  # (26, 2) — (lng, lat)
+    county_coords = np.array(list(COUNTY_CENTROIDS.values()))  # (26, 2) (lng, lat)
 
-    # Tile centroid coordinates — grid_gdf is already in WGS84 at this point
-    lng = grid_gdf["centroid"].apply(lambda p: p.x).to_numpy()
-    lat = grid_gdf["centroid"].apply(lambda p: p.y).to_numpy()
-    tile_coords = np.column_stack([lng, lat])  # (N, 2)
+    sub_gdf = grid_gdf if mask is None else grid_gdf[mask]
+    lng = sub_gdf["centroid"].apply(lambda p: p.x).to_numpy()
+    lat = sub_gdf["centroid"].apply(lambda p: p.y).to_numpy()
+    tile_coords = np.column_stack([lng, lat])
 
-    # Broadcast: (N, 1, 2) − (1, 26, 2) → (N, 26, 2) → squared distances (N, 26)
     diff = tile_coords[:, np.newaxis, :] - county_coords[np.newaxis, :, :]
-    dist_sq = (diff ** 2).sum(axis=2)  # (N, 26)
-    nearest_idx = np.argmin(dist_sq, axis=1)  # (N,)
+    dist_sq = (diff ** 2).sum(axis=2)
+    nearest_idx = np.argmin(dist_sq, axis=1)
+    return [county_names[i] for i in nearest_idx]
 
+
+def assign_counties(grid_gdf: gpd.GeoDataFrame, engine: sqlalchemy.Engine) -> gpd.GeoDataFrame:
+    """
+    Assign county name to each tile.
+
+    Option A: PostGIS spatial join against OSi county boundary file when available.
+              Tiles whose centroid falls outside every county polygon (coastal fringe)
+              are assigned by Voronoi fallback.
+    Option B (fallback): Nearest-centroid Voronoi from COUNTY_CENTROIDS — used when
+              IRELAND_COUNTIES_FILE is absent.
+    """
+    if IRELAND_COUNTIES_FILE.exists():
+        print(f"  Using county boundary file: {IRELAND_COUNTIES_FILE}")
+        counties = gpd.read_file(IRELAND_COUNTIES_FILE).to_crs(GRID_CRS_WGS84)
+
+        # Identify the county name column (OSi: COUNTY/COUNTY_NAME; GADM: NAME_1)
+        name_col_candidates = [
+            c for c in counties.columns
+            if "county" in c.lower() or c in ("NAME", "NAME_1")
+        ]
+        if not name_col_candidates:
+            print("  Warning: could not identify county name column — falling back to Voronoi")
+        else:
+            name_col = name_col_candidates[0]
+            print(f"  County name column: '{name_col}'")
+
+            # Normalise county names: strip leading "County " prefix if present
+            # Note: inline flag (?i) must precede the pattern anchor in Python 3.12+
+            counties = counties.copy()
+            counties[name_col] = counties[name_col].str.replace(
+                r"(?i)^county\s+", "", regex=True
+            ).str.strip()
+
+            # Build a centroid-only GDF for the spatial join
+            centroid_gdf = gpd.GeoDataFrame(
+                index=grid_gdf.index,
+                geometry=grid_gdf["centroid"].values,
+                crs=GRID_CRS_WGS84,
+            )
+            joined = gpd.sjoin(
+                centroid_gdf,
+                counties[["geometry", name_col]],
+                how="left",
+                predicate="within",
+            )
+            # Drop duplicate matches (centroids that fall on county boundaries)
+            joined = joined[~joined.index.duplicated(keep="first")]
+
+            result = grid_gdf.copy()
+            county_series = joined[name_col].reindex(result.index)
+            n_unmatched = county_series.isna().sum()
+
+            if n_unmatched > 0:
+                print(f"  {n_unmatched} tiles unmatched in spatial join — applying Voronoi fallback")
+                unmatched_mask = county_series.isna().to_numpy()
+                voronoi_names = _voronoi_county_assign(result, mask=unmatched_mask)
+                county_series = county_series.copy()
+                county_series.iloc[unmatched_mask] = voronoi_names
+
+            result["county"] = county_series.values
+            return result
+
+    # Option B: Voronoi fallback (no county file)
+    print("  County boundary file not found — using nearest-centroid Voronoi assignment")
     result = grid_gdf.copy()
-    result["county"] = [county_names[i] for i in nearest_idx]
+    result["county"] = _voronoi_county_assign(grid_gdf)
     return result
 
 
@@ -270,14 +337,52 @@ def load_tiles_to_db(grid_gdf: gpd.GeoDataFrame, engine: sqlalchemy.Engine) -> i
         raw_conn.close()
 
 
+def upsert_counties(counties_gdf: gpd.GeoDataFrame, name_col: str, engine: sqlalchemy.Engine) -> None:
+    """
+    Upsert county boundaries into the counties table.
+
+    Adds a geom column (GEOMETRY(MultiPolygon, 4326)) if not present — the base
+    schema only requires county_name TEXT PRIMARY KEY. Normalises county names to
+    strip any leading "County " prefix so they match the FK reference in tiles.
+    """
+    with engine.begin() as conn:
+        conn.execute(text(
+            "ALTER TABLE counties ADD COLUMN IF NOT EXISTS "
+            "geom GEOMETRY(MultiPolygon, 4326)"
+        ))
+
+    from shapely.geometry import MultiPolygon as MPolygon
+
+    with engine.begin() as conn:
+        for _, row in counties_gdf.iterrows():
+            county_name = str(row[name_col]).strip()
+            if county_name.lower().startswith("county "):
+                county_name = county_name[7:].strip()
+
+            geom = row.geometry
+            if geom is None or geom.is_empty:
+                continue
+            if geom.geom_type == "Polygon":
+                geom = MPolygon([geom])
+
+            conn.execute(text("""
+                INSERT INTO counties (county_name, geom)
+                VALUES (:county_name, ST_GeomFromText(:wkt, 4326))
+                ON CONFLICT (county_name) DO UPDATE SET geom = EXCLUDED.geom
+            """), {"county_name": county_name, "wkt": geom.wkt})
+
+    print(f"  Upserted {len(counties_gdf)} county geometries into counties table")
+
+
 def main():
     """
     Full grid generation pipeline:
       1. Load Ireland boundary (Option A file or Option B hard-coded)
       2. Generate grid in EPSG:2157
       3. Reproject to EPSG:4326
-      4. Assign counties (Voronoi from centroids)
+      4. Assign counties (spatial join or Voronoi fallback)
       5. Load to DB (TRUNCATE CASCADE + batch insert)
+      6. Populate counties table with geometries (if county file present)
     """
     print("=" * 60)
     print("Grid generation — Ireland 5 km² tile grid")
@@ -285,16 +390,16 @@ def main():
 
     engine = sqlalchemy.create_engine(DB_URL)
 
-    print("\n[1/5] Loading Ireland boundary...")
+    print("\n[1/6] Loading Ireland boundary...")
     boundary = load_ireland_boundary()
 
-    print("\n[2/5] Generating grid in EPSG:2157 (ITM)...")
+    print("\n[2/6] Generating grid in EPSG:2157 (ITM)...")
     grid_itm = generate_grid_itm(boundary, TILE_SIZE_M)
 
-    print("\n[3/5] Reprojecting to EPSG:4326 (WGS84)...")
+    print("\n[3/6] Reprojecting to EPSG:4326 (WGS84)...")
     grid_wgs84 = reproject_to_wgs84(grid_itm)
 
-    print("\n[4/5] Assigning counties (nearest-centroid Voronoi)...")
+    print("\n[4/6] Assigning counties...")
     grid_final = assign_counties(grid_wgs84, engine)
 
     print("  County tile counts:")
@@ -303,8 +408,22 @@ def main():
         print(f"    {county:<14}: {count:>5}")
     print(f"  Counties present: {len(county_counts)} / 26")
 
-    print("\n[5/5] Loading to database...")
+    print("\n[5/6] Loading to database...")
     n = load_tiles_to_db(grid_final, engine)
+
+    print("\n[6/6] Populating counties table...")
+    if IRELAND_COUNTIES_FILE.exists():
+        counties_gdf = gpd.read_file(IRELAND_COUNTIES_FILE).to_crs(GRID_CRS_WGS84)
+        name_col_candidates = [
+            c for c in counties_gdf.columns
+            if "county" in c.lower() or c in ("NAME", "NAME_1")
+        ]
+        if name_col_candidates:
+            upsert_counties(counties_gdf, name_col_candidates[0], engine)
+        else:
+            print("  Skipped: could not identify county name column")
+    else:
+        print("  Skipped: county boundary file not present")
 
     engine.dispose()
     print(f"\nGrid generation complete: {n:,} tiles inserted.")

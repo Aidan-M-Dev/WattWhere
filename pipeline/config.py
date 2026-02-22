@@ -32,6 +32,11 @@ IRELAND_BOUNDARY_FILE = DATA_ROOT / "grid" / "ireland_boundary.gpkg"
 # Ireland national boundary in EPSG:2157 (ITM) — source: OSi / CSO
 # See ireland-data-sources.md for download URL
 
+IRELAND_COUNTIES_FILE = DATA_ROOT / "grid" / "ireland_counties.gpkg"
+# Ireland county boundaries — source: OSi Open Data Portal (CC BY 4.0)
+# Download from data-osi.opendata.arcgis.com or run grid/download_boundaries.py
+# Fallback: Voronoi nearest-centroid assignment used when file is absent
+
 # Grid parameters
 TILE_SIZE_M = 2236  # √5,000,000 m — gives ~5 km² tiles in EPSG:2157
 GRID_CRS_ITM = "EPSG:2157"

@@ -213,39 +213,39 @@ export type TileData =
 // ── Colour ramp constants (used by MapView + MapLegend) ───────
 // Defined here once — import in components, do not redefine per-component
 
-// Dark-mode ramps: dark at 0 → bright accent colour at 100.
-// Designed for black map background — low scores are near-black, high scores glow.
+// Dark-mode ramps: dark at 0 → accent colour at 100.
+// Colours are pre-multiplied by 0.65 against black (previously fill-opacity was 0.45;
+// bumped to 0.65 equivalent for slightly brighter appearance at full opacity).
 export const COLOR_RAMPS: Record<SortType, ColorRamp> = {
   overall: {
     type: 'sequential',
-    stops: [[0, '#0a1410'], [50, '#1a6b2e'], [100, '#2cb549']],
+    stops: [[0, '#070d0a'], [50, '#11461e'], [100, '#1d762f']],
   },
   energy: {
     type: 'sequential',
-    stops: [[0, '#1a1500'], [50, '#9a8500'], [100, '#fee000']],
+    stops: [[0, '#110e00'], [50, '#645600'], [100, '#a59200']],
   },
   environment: {
     type: 'diverging',
-    // 0 = heavily constrained (dark red), 100 = unconstrained (bright green)
-    stops: [[0, '#5a0a00'], [50, '#3a2200'], [100, '#2cb549']],
+    stops: [[0, '#3b0700'], [50, '#261600'], [100, '#1d762f']],
   },
   cooling: {
     type: 'sequential',
-    stops: [[0, '#00101a'], [50, '#0a5a8a'], [100, '#38bdf8']],
+    stops: [[0, '#000a11'], [50, '#073b5a'], [100, '#247ba1']],
   },
   connectivity: {
     type: 'sequential',
-    stops: [[0, '#0d0a1a'], [50, '#5a3a9e'], [100, '#a78bfa']],
+    stops: [[0, '#080711'], [50, '#3b2667'], [100, '#6d5aa3']],
   },
   planning: {
     type: 'sequential',
-    stops: [[0, '#1a0a00'], [50, '#9a4a18'], [100, '#fb923c']],
+    stops: [[0, '#110700'], [50, '#643010'], [100, '#a35f27']],
   },
 }
 
 /** Temperature sub-metric uses inverted blue ramp: lower°C = better */
 export const TEMPERATURE_RAMP: ColorRamp = {
   type: 'sequential',
-  stops: [[0, '#f7fbff'], [50, '#6baed6'], [100, '#08306b']],
+  stops: [[0, '#a1a3a6'], [50, '#46718b'], [100, '#051f46']],
   inverted: true,
 }

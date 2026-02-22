@@ -19,7 +19,7 @@
   <div class="sidebar-planning">
     <!-- Zoning breakdown -->
     <section class="section">
-      <h3 class="section__title">Zoning Breakdown</h3>
+      <h3 class="section__title">Zoning Breakdown <a href="https://myplan.ie" target="_blank" rel="noopener" class="source-link">source ↗</a></h3>
       <!-- Stacked bar -->
       <div class="zoning-bar">
         <div v-for="z in zoningSegments" :key="z.key"
@@ -40,7 +40,7 @@
 
     <!-- Planning applications -->
     <section class="section">
-      <h3 class="section__title">Planning Applications</h3>
+      <h3 class="section__title">Planning Applications <a href="https://data.gov.ie" target="_blank" rel="noopener" class="source-link">source ↗</a></h3>
       <div v-if="data.planning_applications?.length">
         <div
           v-for="app in data.planning_applications"
@@ -61,7 +61,7 @@
 
     <!-- IDA sites + population -->
     <section class="section">
-      <h3 class="section__title">Context</h3>
+      <h3 class="section__title">Context <a href="https://www.idaireland.com/locate-in-ireland/available-properties" target="_blank" rel="noopener" class="source-link">source ↗</a></h3>
       <div class="kv-row" v-if="data.nearest_ida_site_km !== null">
         <span class="kv-row__label">Nearest IDA site</span>
         <span class="kv-row__value">{{ data.nearest_ida_site_km?.toFixed(1) }} km</span>
@@ -97,7 +97,9 @@ const zoningSegments = computed(() => [
 
 <style scoped>
 .sidebar-planning { display: flex; flex-direction: column; gap: 20px; }
-.section__title { font-size: 11px; font-weight: 600; color: rgba(255,255,255,0.4); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 10px; }
+.section__title { font-size: 11px; font-weight: 600; color: rgba(255,255,255,0.4); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between; }
+.source-link { font-size: 10px; font-weight: 400; color: rgba(255,255,255,0.2); text-decoration: none; text-transform: none; letter-spacing: 0; flex-shrink: 0; }
+.source-link:hover { color: rgba(255,255,255,0.6); }
 
 .zoning-bar { display: flex; height: 10px; border-radius: 5px; overflow: hidden; gap: 1px; margin-bottom: 12px; }
 .zoning-bar__segment { height: 100%; transition: width 0.4s; }

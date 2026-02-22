@@ -60,6 +60,11 @@ const tileError = ref(false)
 let map: maplibregl.Map | null = null
 let hoveredTileId: number | null = null
 
+// Ireland's bounding box (WGS84). Used for the soft viewport pull-back.
+const IRELAND_BBOX = { west: -10.7, east: -5.8, south: 51.2, north: 55.6 }
+const IRELAND_CENTER: [number, number] = [-7.6, 53.4]
+const MIN_ZOOM = 5.5  // below this Ireland becomes too small to be useful
+
 // ── Map initialisation ────────────────────────────────────────
 
 onMounted(() => {
@@ -84,7 +89,7 @@ onMounted(() => {
     },
     center: [-7.6, 53.4],  // Ireland centroid
     zoom: 6.5,
-    minZoom: 5,
+    minZoom: MIN_ZOOM,
     maxZoom: 18,
   })
 
@@ -147,11 +152,13 @@ function setupLayers() {
     'source-layer': 'tile_heatmap',
     paint: {
       'fill-color': buildColorExpression(),
-      'fill-opacity': 0.45,
+      'fill-opacity': 1,
     },
   }, firstSymbolId)
 
-  // Layer 3: Tile grid borders — visible white lines between tiles on dark bg
+  // Layer 3: Tile grid borders — scale with zoom so they don't overwhelm at low zoom.
+  // At zoom 5–6 many tiles fit on screen; fixed-width lines merge into solid white.
+  // Interpolating both width and opacity keeps the grid readable without dominating.
   map.addLayer({
     id: 'tiles-border',
     type: 'line',
@@ -159,20 +166,22 @@ function setupLayers() {
     'source-layer': 'tile_heatmap',
     paint: {
       'line-color': '#ffffff',
-      'line-opacity': 0.4,
-      'line-width': 0.75,
+      'line-opacity': ['interpolate', ['linear'], ['zoom'], 5, 0.1, 8, 0.25, 12, 0.45],
+      'line-width':   ['interpolate', ['linear'], ['zoom'], 5, 0.2, 8, 0.5,  12, 1.0],
     },
   }, firstSymbolId)
 
-  // Layer 3b: County outlines — real PostGIS geometry via Martin, renders above choropleth
+  // Layer 3b: County outlines — subtle administrative reference, renders above choropleth.
+  // Thicker than tile-grid borders (1.5px vs 0.75px) so they're distinguishable, but kept
+  // at low opacity so they don't dominate the choropleth colour signal.
   map.addLayer({
     id: 'county-lines',
     type: 'line',
     source: 'county-outlines',
     paint: {
       'line-color': '#ffffff',
-      'line-opacity': 0.55,
-      'line-width': 1.5,
+      'line-opacity': ['interpolate', ['linear'], ['zoom'], 5, 0.15, 8, 0.25, 12, 0.35],
+      'line-width':   ['interpolate', ['linear'], ['zoom'], 5, 0.5,  8, 1.0,  12, 1.5],
     },
   })
 
@@ -328,6 +337,30 @@ function setupInteractions() {
       map!.setFilter('tiles-selected', ['==', ['get', 'tile_id'], -1])
     }
   })
+
+  // ── Soft viewport clamping — spring back to Ireland ──────────
+  // If the user pans/zooms so that Ireland is completely out of frame,
+  // ease back to re-include it. The cubic ease-out gives a "spring" feel.
+  function pullBackIfNeeded() {
+    if (!map) return
+    const b = map.getBounds()
+    const irelandVisible = (
+      b.getWest()  < IRELAND_BBOX.east  &&
+      b.getEast()  > IRELAND_BBOX.west  &&
+      b.getSouth() < IRELAND_BBOX.north &&
+      b.getNorth() > IRELAND_BBOX.south
+    )
+    if (!irelandVisible) {
+      map.easeTo({
+        center: IRELAND_CENTER,
+        zoom: Math.max(map.getZoom(), 6.5),
+        duration: 700,
+        easing: t => 1 - (1 - t) ** 3,  // cubic ease-out
+      })
+    }
+  }
+
+  map.on('moveend', pullBackIfNeeded)
 
   // Error handling for tile source.
   // MapLibre's ErrorEvent type doesn't include sourceId in its type definition,

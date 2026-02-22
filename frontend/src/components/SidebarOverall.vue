@@ -26,7 +26,7 @@
 
     <!-- Sub-score breakdown -->
     <section class="section">
-      <h3 class="section__title">Score Breakdown</h3>
+      <h3 class="section__title">Score Breakdown <a href="https://investigates.thejournal.ie/data-centres" target="_blank" rel="noopener" class="source-link">source ↗</a></h3>
       <div class="sub-scores">
         <div
           v-for="sub in subScores"
@@ -129,7 +129,9 @@ const subScores = computed(() => [
   color: #e74c3c;
 }
 
-.section__title { font-size: 11px; font-weight: 600; color: rgba(255,255,255,0.4); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 10px; }
+.section__title { font-size: 11px; font-weight: 600; color: rgba(255,255,255,0.4); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between; }
+.source-link { font-size: 10px; font-weight: 400; color: rgba(255,255,255,0.2); text-decoration: none; text-transform: none; letter-spacing: 0; flex-shrink: 0; }
+.source-link:hover { color: rgba(255,255,255,0.6); }
 
 .sub-score-row { margin-bottom: 10px; }
 .sub-score-row__header { display: flex; align-items: center; margin-bottom: 4px; }
