@@ -51,7 +51,7 @@ case "$FROM" in
 esac
 
 SORTS=(energy environment cooling connectivity planning)
-SORTS_WITH_DOWNLOAD=(energy environment cooling)
+SORTS_WITH_DOWNLOAD=(energy environment cooling connectivity)
 
 elapsed() { echo "  (${SECONDS}s elapsed)"; }
 
@@ -103,11 +103,11 @@ if [[ "$SKIP_DOWNLOAD" == false && "$ONLY" != "__composite_only__" ]]; then
   if [[ -n "$ONLY" && "$ONLY" != "__composite_only__" ]]; then
     # Download for one sort only
     case "$ONLY" in
-      energy|environment|cooling)
+      energy|environment|cooling|connectivity)
         echo "  Downloading $ONLY sources..."
         $PIPELINE python "$ONLY/download_sources.py"
         ;;
-      connectivity|planning)
+      planning)
         echo "  No download script for $ONLY (uses config.py constants or manual data)"
         ;;
     esac
