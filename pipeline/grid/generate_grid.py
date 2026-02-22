@@ -30,7 +30,7 @@ from pathlib import Path
 
 import numpy as np
 import geopandas as gpd
-from shapely.geometry import box, Point, Polygon
+from shapely.geometry import Polygon
 import shapely
 import sqlalchemy
 from sqlalchemy import text
@@ -166,25 +166,28 @@ def generate_grid_itm(boundary_gdf: gpd.GeoDataFrame, tile_size_m: int) -> gpd.G
 
     print(f"  {len(within_idx):,} tiles pass centroid-clip to Ireland boundary")
 
-    tiles = []
-    for flat_idx in within_idx:
-        row_i = int(flat_idx // n_cols)
-        col_j = int(flat_idx % n_cols)
-        x = float(x_starts[col_j])
-        y = float(y_starts[row_i])
-        cx = x + tile_size_m / 2
-        cy = y + tile_size_m / 2
-        tiles.append(
-            {
-                "geometry": box(x, y, x + tile_size_m, y + tile_size_m),
-                "centroid": Point(cx, cy),
-                "row": row_i,
-                "col": col_j,
-                "grid_ref": f"R{row_i:04d}C{col_j:04d}",
-            }
-        )
+    # Vectorized tile construction — all geometry built in C, no Python loop
+    row_indices = within_idx // n_cols
+    col_indices = within_idx % n_cols
 
-    return gpd.GeoDataFrame(tiles, crs=GRID_CRS_ITM)
+    x_vals = x_starts[col_indices]
+    y_vals = y_starts[row_indices]
+    half = tile_size_m / 2
+
+    boxes = shapely.box(x_vals, y_vals, x_vals + tile_size_m, y_vals + tile_size_m)
+    centroids = shapely.points(x_vals + half, y_vals + half)
+    grid_refs = [f"R{r:04d}C{c:04d}" for r, c in zip(row_indices, col_indices)]
+
+    return gpd.GeoDataFrame(
+        {
+            "geometry": boxes,
+            "centroid": centroids,
+            "row": row_indices,
+            "col": col_indices,
+            "grid_ref": grid_refs,
+        },
+        crs=GRID_CRS_ITM,
+    )
 
 
 def reproject_to_wgs84(grid_gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
@@ -211,8 +214,9 @@ def _voronoi_county_assign(grid_gdf: gpd.GeoDataFrame, mask=None) -> list:
     county_coords = np.array(list(COUNTY_CENTROIDS.values()))  # (26, 2) (lng, lat)
 
     sub_gdf = grid_gdf if mask is None else grid_gdf[mask]
-    lng = sub_gdf["centroid"].apply(lambda p: p.x).to_numpy()
-    lat = sub_gdf["centroid"].apply(lambda p: p.y).to_numpy()
+    centroid_arr = np.asarray(sub_gdf["centroid"].values)
+    lng = shapely.get_x(centroid_arr)
+    lat = shapely.get_y(centroid_arr)
     tile_coords = np.column_stack([lng, lat])
 
     diff = tile_coords[:, np.newaxis, :] - county_coords[np.newaxis, :, :]
@@ -304,15 +308,15 @@ def load_tiles_to_db(grid_gdf: gpd.GeoDataFrame, engine: sqlalchemy.Engine) -> i
     try:
         cursor = raw_conn.cursor()
 
+        # Vectorized WKT generation — single C call instead of per-row .wkt
+        geom_wkts = shapely.to_wkt(grid_gdf.geometry.values)
+        centroid_wkts = shapely.to_wkt(np.asarray(grid_gdf["centroid"].values))
+        counties = grid_gdf["county"].values
+        grid_refs = grid_gdf["grid_ref"].values
+
         records = [
-            (
-                row.geometry.wkt,       # tile polygon WKT
-                row["centroid"].wkt,    # centroid point WKT
-                row["county"],
-                row["grid_ref"],
-                5.0,                    # area_km2 (nominal)
-            )
-            for _, row in grid_gdf.iterrows()
+            (geom_wkts[i], centroid_wkts[i], counties[i], grid_refs[i], 5.0)
+            for i in range(len(grid_gdf))
         ]
 
         execute_values(

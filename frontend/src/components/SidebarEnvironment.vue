@@ -59,10 +59,7 @@
           {{ data.intersects_future_flood ? 'Yes (penalty)' : 'No' }}
         </span>
       </div>
-      <div class="kv-row">
-        <span class="kv-row__label">Flood risk score</span>
-        <span class="kv-row__value">{{ data.flood_risk?.toFixed(0) ?? '—' }}/100</span>
-      </div>
+      <!-- flood_risk score moved to Planning sort (P2-22) -->
       <a
         href="https://www.floodinfo.ie"
         target="_blank"
@@ -80,9 +77,19 @@
           {{ data.landslide_susceptibility ?? 'none' }}
         </span>
       </div>
+      <!-- landslide_risk score moved to Planning sort (P2-22) -->
+    </section>
+
+    <!-- Water & Aquifer (moved from Cooling, P2-22) -->
+    <section class="section">
+      <h3 class="section__title">Water &amp; Aquifer <a href="https://gis.epa.ie/GetData/Download" target="_blank" rel="noopener" class="source-link">source ↗</a></h3>
       <div class="kv-row">
-        <span class="kv-row__label">Landslide risk score</span>
-        <span class="kv-row__value">{{ data.landslide_risk?.toFixed(0) ?? '—' }}/100</span>
+        <span class="kv-row__label">Water proximity score</span>
+        <span class="kv-row__value">{{ data.water_proximity?.toFixed(0) ?? '—' }}/100</span>
+      </div>
+      <div class="kv-row">
+        <span class="kv-row__label">Aquifer productivity score</span>
+        <span class="kv-row__value">{{ data.aquifer_productivity?.toFixed(0) ?? '—' }}/100</span>
       </div>
     </section>
 

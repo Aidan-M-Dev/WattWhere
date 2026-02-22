@@ -12,7 +12,7 @@ import type { FeatureCollection, Point, Feature } from 'geojson'
 
 // ── Sort types ────────────────────────────────────────────────
 
-/** The 6 thematic data sorts. Matches keys returned by GET /api/sorts */
+/** The 6 thematic data sorts + custom pseudo-sort. Matches keys returned by GET /api/sorts */
 export type SortType =
   | 'overall'
   | 'energy'
@@ -20,6 +20,17 @@ export type SortType =
   | 'cooling'
   | 'connectivity'
   | 'planning'
+  | 'custom'
+
+/** A user-selected metric for the Custom Combination Builder */
+export interface CustomMetric {
+  sort: string      // source sort key e.g. 'energy'
+  metric: string    // metric key e.g. 'wind_speed_100m'
+  sortLabel: string // display: 'Energy'
+  label: string     // display: 'Wind speed at 100m'
+  unit: string      // display: 'm/s'
+  weight: number    // user-assigned weight (raw, not normalised)
+}
 
 /** A single sub-metric within a sort (e.g. wind_speed_100m in energy sort) */
 export interface MetricMeta {
@@ -119,18 +130,21 @@ export interface TileEnergy extends TileBase {
   wind_speed_100m: number | null
   wind_speed_150m: number | null
   solar_ghi: number | null
-  grid_proximity: number | null
+  // grid_proximity moved to TileConnectivity (P2-22)
   nearest_transmission_line_km: number | null
   nearest_substation_km: number | null
   nearest_substation_name: string | null
   nearest_substation_voltage: string | null
   grid_low_confidence: boolean
+  renewable_score: number | null
+  renewable_pct: number | null
+  renewable_capacity_mw: number | null
+  fossil_capacity_mw: number | null
 }
 
 export interface TileEnvironment extends TileBase {
   designation_overlap: number | null
-  flood_risk: number | null
-  landslide_risk: number | null
+  // flood_risk and landslide_risk moved to TilePlanning (P2-22)
   has_hard_exclusion: boolean
   exclusion_reason: string | null
   intersects_sac: boolean
@@ -142,6 +156,9 @@ export interface TileEnvironment extends TileBase {
   landslide_susceptibility: 'none' | 'low' | 'medium' | 'high' | null
   /** List of protected areas intersecting this tile */
   designations: DesignationOverlap[]
+  /** Moved from TileCooling (P2-22) */
+  water_proximity: number | null
+  aquifer_productivity: number | null
 }
 
 export interface DesignationOverlap {
@@ -153,9 +170,8 @@ export interface DesignationOverlap {
 
 export interface TileCooling extends TileBase {
   temperature: number | null          // °C raw
-  water_proximity: number | null
+  // water_proximity and aquifer_productivity moved to TileEnvironment (P2-22)
   rainfall: number | null             // mm/yr raw
-  aquifer_productivity: number | null
   free_cooling_hours: number | null
   nearest_waterbody_name: string | null
   nearest_waterbody_km: number | null
@@ -175,11 +191,16 @@ export interface TileConnectivity extends TileBase {
   nearest_motorway_junction_name: string | null
   nearest_national_road_km: number | null
   nearest_rail_freight_km: number | null
+  /** Moved from TileEnergy (P2-22) */
+  grid_proximity: number | null
 }
 
 export interface TilePlanning extends TileBase {
   zoning_tier: number | null
   planning_precedent: number | null
+  /** Moved from TileEnvironment (P2-22) */
+  flood_risk: number | null
+  landslide_risk: number | null
   pct_industrial: number
   pct_enterprise: number
   pct_mixed_use: number
@@ -243,6 +264,10 @@ export const COLOR_RAMPS: Record<SortType, ColorRamp> = {
   planning: {
     type: 'sequential',
     stops: [[0, '#110700'], [50, '#643010'], [100, '#a35f27']],
+  },
+  custom: {
+    type: 'sequential',
+    stops: [[0, '#0a0711'], [50, '#3b2667'], [100, '#8b6af0']],
   },
 }
 

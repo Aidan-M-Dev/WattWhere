@@ -33,10 +33,23 @@
         <component :is="getIcon(sort.icon)" :size="16" class="sort-tab__icon" />
         <span class="sort-tab__label">{{ sort.label }}</span>
       </button>
+
+      <!-- Custom combination tab (fixed, not from API) -->
+      <button
+        class="sort-tab"
+        :class="{ 'sort-tab--active': store.activeSort === 'custom' }"
+        role="tab"
+        :aria-selected="store.activeSort === 'custom'"
+        title="Build a custom metric combination"
+        @click="onSortClick('custom' as SortType)"
+      >
+        <SlidersHorizontal :size="16" class="sort-tab__icon" />
+        <span class="sort-tab__label">Custom</span>
+      </button>
     </div>
 
     <!-- Secondary row: Sub-metric pills (active sort's metrics) -->
-    <div class="databar-metrics" role="tablist" aria-label="Sub-metrics" v-if="activeMetrics.length">
+    <div class="databar-metrics" role="tablist" aria-label="Sub-metrics" v-if="activeMetrics.length && store.activeSort !== 'custom'">
       <button
         v-for="metric in activeMetrics"
         :key="metric.key"
@@ -63,6 +76,7 @@
 import { computed } from 'vue'
 import {
   BarChart3, Zap, ShieldAlert, Thermometer, Globe, Map as MapIcon,
+  SlidersHorizontal,
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
 import { useSuitabilityStore } from '@/stores/suitability'
@@ -80,6 +94,7 @@ const ICON_MAP: Record<string, Component> = {
   Thermometer,
   Globe,
   Map: MapIcon,
+  SlidersHorizontal,
 }
 
 function getIcon(iconName: string): Component {

@@ -66,12 +66,16 @@ const MOCK_TILE_ENERGY: TileEnergy = {
   wind_speed_100m: 7.3,
   wind_speed_150m: 8.9,
   solar_ghi: 950,
-  grid_proximity: 75,
+  // grid_proximity moved to TileConnectivity (P2-22)
   nearest_transmission_line_km: 3.4,
   nearest_substation_km: 8.1,
   nearest_substation_name: 'Poolbeg',
   nearest_substation_voltage: '220kV',
   grid_low_confidence: false,
+  renewable_score: 45,
+  renewable_pct: 45.2,
+  renewable_capacity_mw: 320,
+  fossil_capacity_mw: 388,
 }
 
 // ── Helpers ──────────────────────────────────────────────────────

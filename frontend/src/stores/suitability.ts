@@ -23,6 +23,7 @@ import type {
   TileData,
   MetricRange,
   SuitabilityState,
+  CustomMetric,
 } from '@/types'
 import { FeatureCollection, Point } from 'geojson'
 import { useToast } from '@/composables/useToast'
@@ -48,6 +49,12 @@ export const useSuitabilityStore = defineStore('suitability', () => {
   const pinsLoading = ref<boolean>(false)
   const error = ref<string | null>(null)
 
+  // ── Custom combination builder state ──────────────────────
+  const customMetrics = ref<CustomMetric[]>([])
+  const customBuilderOpen = ref(false)
+  const customMetricsApplied = ref<CustomMetric[]>([])
+  const customTileScores = ref<Record<string, number>>({})
+
   // ── Computed ────────────────────────────────────────────────
 
   /** Active sort's full metadata from sortsMeta */
@@ -60,15 +67,32 @@ export const useSuitabilityStore = defineStore('suitability', () => {
     activeSortMeta.value?.metrics.find(m => m.key === activeMetric.value) ?? null
   )
 
+  /** Flattened list of all sub-metrics across all sorts (excludes 'score' composites and 'overall') */
+  const allAvailableMetrics = computed(() => {
+    const result: Array<{ sort: string; sortLabel: string; metric: string; label: string; unit: string }> = []
+    for (const s of sortsMeta.value) {
+      if (s.key === 'overall' || s.key === 'custom') continue
+      for (const m of s.metrics) {
+        if (m.key === 'score') continue
+        result.push({ sort: s.key, sortLabel: s.label, metric: m.key, label: m.label, unit: m.unit })
+      }
+    }
+    return result
+  })
+
   /**
    * Martin MVT tile URL — reactive, rebuilt whenever sort or metric changes.
    * Must be absolute: MapLibre fetches tiles inside a WebWorker which has no
    * base URL, so relative paths like /tiles/... fail to construct a Request.
    * window.location.origin gives http://localhost in dev, the real host in prod.
    */
-  const martinTileUrl = computed(() =>
-    `${window.location.origin}/tiles/tile_heatmap/{z}/{x}/{y}?sort=${activeSort.value}&metric=${activeMetric.value}`
-  )
+  const martinTileUrl = computed(() => {
+    if (activeSort.value === 'custom') {
+      // Use overall/score for geometry — fill-color overridden by client-side blend
+      return `${window.location.origin}/tiles/tile_heatmap/{z}/{x}/{y}?sort=overall&metric=score`
+    }
+    return `${window.location.origin}/tiles/tile_heatmap/{z}/{x}/{y}?sort=${activeSort.value}&metric=${activeMetric.value}`
+  })
 
   // ── Actions ─────────────────────────────────────────────────
 
@@ -166,14 +190,25 @@ export const useSuitabilityStore = defineStore('suitability', () => {
    * Resets metric to 'score', refetches pins, updates Martin URL, clears tile.
    */
   async function setActiveSort(sort: SortType) {
-    if (sort === activeSort.value) return
+    if (sort === activeSort.value) {
+      // Clicking custom again toggles the builder panel
+      if (sort === 'custom') customBuilderOpen.value = !customBuilderOpen.value
+      return
+    }
     activeSort.value = sort
-    activeMetric.value = 'score'  // always reset to composite on sort change
+    activeMetric.value = 'score'
     selectedTileId.value = null
     selectedTileData.value = null
     sidebarOpen.value = false
     metricRange.value = null
-    await fetchPins(sort)
+
+    if (sort === 'custom') {
+      customBuilderOpen.value = true
+      pins.value = { type: 'FeatureCollection', features: [] }
+    } else {
+      customBuilderOpen.value = false
+      await fetchPins(sort)
+    }
   }
 
   /**
@@ -195,10 +230,65 @@ export const useSuitabilityStore = defineStore('suitability', () => {
   /**
    * User clicks a tile on the map.
    * Fetches tile detail, opens sidebar.
+   * Custom mode uses /api/tile/{id}/all for all-sorts data.
    */
   async function setSelectedTile(tileId: number) {
     selectedTileId.value = tileId
-    await fetchTileDetail(tileId, activeSort.value)
+    if (activeSort.value === 'custom') {
+      await fetchTileDetailAll(tileId)
+    } else {
+      await fetchTileDetail(tileId, activeSort.value)
+    }
+  }
+
+  /**
+   * Fetch all-sorts tile data for custom mode sidebar.
+   * Calls GET /api/tile/{id}/all — returns data from all 6 sorts.
+   */
+  async function fetchTileDetailAll(tileId: number) {
+    loading.value = true
+    error.value = null
+    try {
+      const response = await fetch(`${API_BASE}/tile/${tileId}/all`)
+      if (!response.ok) throw new Error(`/api/tile/${tileId}/all returned ${response.status}`)
+      const data = await response.json()
+      selectedTileData.value = data
+      sidebarOpen.value = true
+    } catch (err) {
+      error.value = err instanceof Error ? err.message : 'Failed to load tile data'
+      pushToast({ id: 'tile-error', message: 'Failed to load tile detail', type: 'error' })
+      sidebarOpen.value = true
+    } finally {
+      loading.value = false
+    }
+  }
+
+  // ── Custom combination builder actions ────────────────────
+
+  function addCustomMetric(item: { sort: string; metric: string; sortLabel: string; label: string; unit: string }) {
+    if (customMetrics.value.some(cm => cm.sort === item.sort && cm.metric === item.metric)) return
+    customMetrics.value.push({ ...item, weight: 50 })
+  }
+
+  function removeCustomMetric(sort: string, metric: string) {
+    customMetrics.value = customMetrics.value.filter(cm => !(cm.sort === sort && cm.metric === metric))
+  }
+
+  function setCustomWeight(sort: string, metric: string, weight: number) {
+    const cm = customMetrics.value.find(c => c.sort === sort && c.metric === metric)
+    if (cm) cm.weight = weight
+  }
+
+  /** Copy working selection to applied state — triggers map recomputation */
+  function applyCustomComposite() {
+    customMetricsApplied.value = customMetrics.value.map(cm => ({ ...cm }))
+  }
+
+  /** Store normalised 0–100 scores per metric for the clicked tile (set by MapView) */
+  function setCustomTileScores(values: Map<string, number>) {
+    const obj: Record<string, number> = {}
+    values.forEach((v, k) => { obj[k] = v })
+    customTileScores.value = obj
   }
 
   /** User clicks close on sidebar or clicks empty map area. */
@@ -227,10 +317,16 @@ export const useSuitabilityStore = defineStore('suitability', () => {
     loading,
     pinsLoading,
     error,
+    // Custom combination builder state
+    customMetrics,
+    customBuilderOpen,
+    customMetricsApplied,
+    customTileScores,
     // Computed
     activeSortMeta,
     activeMetricMeta,
     martinTileUrl,
+    allAvailableMetrics,
     // Actions
     init,
     fetchSortsMeta,
@@ -242,5 +338,11 @@ export const useSuitabilityStore = defineStore('suitability', () => {
     setSelectedTile,
     closeSidebar,
     clearSelection,
+    // Custom combination builder actions
+    addCustomMetric,
+    removeCustomMetric,
+    setCustomWeight,
+    applyCustomComposite,
+    setCustomTileScores,
   }
 })

@@ -31,7 +31,7 @@ postgres:
   tables:
     county_outlines:
       schema: public
-      table: county_outlines
+      table: counties
       srid: 4326
       geometry_column: geom
       bounds:
@@ -41,5 +41,4 @@ postgres:
         - 55.29881656409948
       geometry_type: MULTIPOLYGON
       properties:
-        id: integer
-        county: text
+        county_name: text

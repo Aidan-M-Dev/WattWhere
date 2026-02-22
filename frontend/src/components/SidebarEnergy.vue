@@ -51,10 +51,7 @@
 
     <section class="section">
       <h3 class="section__title">Grid Infrastructure <a href="https://www.openstreetmap.org" target="_blank" rel="noopener" class="source-link">source ↗</a></h3>
-      <div class="kv-row">
-        <span class="kv-row__label">Grid proximity score</span>
-        <span class="kv-row__value">{{ data.grid_proximity?.toFixed(0) ?? '—' }}</span>
-      </div>
+      <!-- grid_proximity score moved to Connectivity sort (P2-22) -->
       <div class="kv-row" v-if="data.nearest_transmission_line_km !== null">
         <span class="kv-row__label">Nearest transmission line</span>
         <span class="kv-row__value">{{ data.nearest_transmission_line_km?.toFixed(1) }} km</span>
@@ -73,6 +70,29 @@
       </div>
     </section>
 
+    <section class="section" v-if="data.renewable_pct !== null && data.renewable_pct !== undefined">
+      <h3 class="section__title">Renewable Energy <a href="https://www.seai.ie/data-and-insights/seai-statistics/key-statistics/renewable-energy/" target="_blank" rel="noopener" class="source-link">source ↗</a></h3>
+      <div class="kv-row">
+        <span class="kv-row__label">Renewable score</span>
+        <span class="kv-row__value">{{ data.renewable_score ?? '—' }}</span>
+      </div>
+      <div class="kv-row">
+        <span class="kv-row__label">Renewable share</span>
+        <span class="kv-row__value">{{ data.renewable_pct !== null ? `${data.renewable_pct.toFixed(1)}%` : '—' }}</span>
+      </div>
+      <div class="capacity-bar" v-if="totalCapacity > 0">
+        <div class="capacity-bar__fill" :style="{ width: `${data.renewable_pct}%` }"></div>
+      </div>
+      <div class="kv-row" v-if="data.renewable_capacity_mw !== null">
+        <span class="kv-row__label">Renewable capacity</span>
+        <span class="kv-row__value">{{ data.renewable_capacity_mw?.toFixed(0) }} MW</span>
+      </div>
+      <div class="kv-row" v-if="data.fossil_capacity_mw !== null">
+        <span class="kv-row__label">Fossil capacity</span>
+        <span class="kv-row__value">{{ data.fossil_capacity_mw?.toFixed(0) }} MW</span>
+      </div>
+    </section>
+
     <section class="section">
       <a
         href="https://www.smartgriddashboard.com"
@@ -88,10 +108,15 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import { AlertTriangle } from 'lucide-vue-next'
 import type { TileEnergy } from '@/types'
 
-defineProps<{ data: TileEnergy }>()
+const props = defineProps<{ data: TileEnergy }>()
+
+const totalCapacity = computed(() =>
+  (props.data.renewable_capacity_mw ?? 0) + (props.data.fossil_capacity_mw ?? 0)
+)
 </script>
 
 <style scoped>
@@ -106,4 +131,6 @@ defineProps<{ data: TileEnergy }>()
 .external-link { font-size: 13px; color: #6baed6; text-decoration: none; }
 .external-link:hover { text-decoration: underline; }
 .note { font-size: 11px; color: rgba(255,255,255,0.3); margin-top: 4px; }
+.capacity-bar { width: 100%; height: 6px; background: rgba(255,255,255,0.08); border-radius: 3px; overflow: hidden; margin: 6px 0; }
+.capacity-bar__fill { height: 100%; background: #4ade80; border-radius: 3px; transition: width 0.3s ease; }
 </style>

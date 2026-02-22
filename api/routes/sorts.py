@@ -86,7 +86,8 @@ SORTS_METADATA: list[SortMeta] = [
             MetricMeta(key="score",           label="Energy Score",          unit="0–100",        isDefault=True),
             MetricMeta(key="wind_speed_100m", label="Wind speed at 100m",   unit="m/s",          isDefault=False),
             MetricMeta(key="solar_ghi",       label="Solar irradiance (GHI)",unit="kWh/m²/yr",   isDefault=False),
-            MetricMeta(key="grid_proximity",  label="Grid proximity score", unit="0–100",        isDefault=False),
+            MetricMeta(key="renewable",      label="Renewable energy score",unit="0–100",       isDefault=False),
+            MetricMeta(key="renewable_pct",  label="Renewable energy %",   unit="%",            isDefault=False),
         ],
     ),
     SortMeta(
@@ -97,8 +98,8 @@ SORTS_METADATA: list[SortMeta] = [
         metrics=[
             MetricMeta(key="score",                label="Constraint composite",      unit="0–100", isDefault=True),
             MetricMeta(key="designation_overlap",  label="Designation severity",      unit="0–100", isDefault=False),
-            MetricMeta(key="flood_risk",           label="Flood risk (inverted)",     unit="0–100", isDefault=False),
-            MetricMeta(key="landslide_risk",       label="Landslide risk (inverted)", unit="0–100", isDefault=False),
+            MetricMeta(key="water_proximity",      label="Water proximity score",     unit="0–100", isDefault=False),
+            MetricMeta(key="aquifer_productivity",  label="Aquifer productivity",      unit="0–100", isDefault=False),
         ],
     ),
     SortMeta(
@@ -109,9 +110,7 @@ SORTS_METADATA: list[SortMeta] = [
         metrics=[
             MetricMeta(key="score",              label="Cooling Score",            unit="0–100",  isDefault=True),
             MetricMeta(key="temperature",        label="Mean annual temperature",  unit="°C",     isDefault=False),
-            MetricMeta(key="water_proximity",    label="Water proximity score",    unit="0–100",  isDefault=False),
             MetricMeta(key="rainfall",           label="Annual rainfall",          unit="mm/yr",  isDefault=False),
-            MetricMeta(key="aquifer_productivity", label="Aquifer productivity",     unit="0–100",  isDefault=False),
         ],
     ),
     SortMeta(
@@ -120,10 +119,11 @@ SORTS_METADATA: list[SortMeta] = [
         icon="Globe",
         description="Digital connectivity, internet exchange proximity, and physical transport access.",
         metrics=[
-            MetricMeta(key="score",       label="Connectivity Score",    unit="0–100", isDefault=True),
-            MetricMeta(key="broadband",   label="Broadband coverage",   unit="0–100", isDefault=False),
-            MetricMeta(key="ix_distance", label="IX distance score",    unit="0–100", isDefault=False),
-            MetricMeta(key="road_access", label="Road access score",    unit="0–100", isDefault=False),
+            MetricMeta(key="score",           label="Connectivity Score",    unit="0–100", isDefault=True),
+            MetricMeta(key="broadband",       label="Broadband coverage",   unit="0–100", isDefault=False),
+            MetricMeta(key="ix_distance",     label="IX distance score",    unit="0–100", isDefault=False),
+            MetricMeta(key="road_access",     label="Road access score",    unit="0–100", isDefault=False),
+            MetricMeta(key="grid_proximity",  label="Grid proximity score", unit="0–100", isDefault=False),
         ],
     ),
     SortMeta(
@@ -132,11 +132,13 @@ SORTS_METADATA: list[SortMeta] = [
         icon="Map",
         description="Favourability of local planning and zoning context for data centre development.",
         metrics=[
-            MetricMeta(key="score",                  label="Planning Score",          unit="0–100",  isDefault=True),
-            MetricMeta(key="zoning_tier",            label="Zoning tier score",       unit="0–100",  isDefault=False),
-            MetricMeta(key="planning_precedent",     label="Planning precedent score",unit="0–100",  isDefault=False),
-            MetricMeta(key="land_price",             label="Land price score",        unit="0–100",  isDefault=False),
-            MetricMeta(key="avg_price_per_sqm_eur",  label="Property price (raw)",    unit="€/m²",   isDefault=False),
+            MetricMeta(key="score",                  label="Planning Score",              unit="0–100",  isDefault=True),
+            MetricMeta(key="zoning_tier",            label="Zoning tier score",           unit="0–100",  isDefault=False),
+            MetricMeta(key="planning_precedent",     label="Planning precedent score",    unit="0–100",  isDefault=False),
+            MetricMeta(key="flood_risk",             label="Flood risk (inverted)",       unit="0–100",  isDefault=False),
+            MetricMeta(key="landslide_risk",         label="Landslide risk (inverted)",   unit="0–100",  isDefault=False),
+            MetricMeta(key="land_price",             label="Land price score",            unit="0–100",  isDefault=False),
+            MetricMeta(key="avg_price_per_sqm_eur",  label="Property price (raw)",        unit="€/m²",   isDefault=False),
         ],
     ),
 ]

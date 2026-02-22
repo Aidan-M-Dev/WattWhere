@@ -45,20 +45,30 @@ BEGIN
                 WHEN v_sort = 'overall' AND v_metric = 'planning_score'     THEN o.planning_score
                 -- ── ENERGY ──────────────────────────────────────────────
                 WHEN v_sort = 'energy' AND v_metric = 'score'              THEN e.score
-                WHEN v_sort = 'energy' AND v_metric = 'grid_proximity'     THEN e.grid_proximity
+                -- grid_proximity moved to connectivity (P2-22)
+                -- WHEN v_sort = 'energy' AND v_metric = 'grid_proximity'     THEN e.grid_proximity
                 WHEN v_sort = 'energy' AND v_metric = 'wind_speed_100m'    THEN
                     (e.wind_speed_100m - mr.min_val) / NULLIF(mr.max_val - mr.min_val, 0) * 100
                 WHEN v_sort = 'energy' AND v_metric = 'solar_ghi'          THEN
                     (e.solar_ghi - mr.min_val) / NULLIF(mr.max_val - mr.min_val, 0) * 100
+                WHEN v_sort = 'energy' AND v_metric = 'renewable'         THEN e.renewable_score
+                WHEN v_sort = 'energy' AND v_metric = 'renewable_pct'     THEN
+                    CASE WHEN mr.min_val IS NOT NULL AND mr.max_val > mr.min_val
+                        THEN ((e.renewable_pct - mr.min_val) / (mr.max_val - mr.min_val) * 100)::int
+                        ELSE 0 END
                 -- ── ENVIRONMENT ─────────────────────────────────────────
                 WHEN v_sort = 'environment' AND v_metric = 'score'               THEN env.score
                 WHEN v_sort = 'environment' AND v_metric = 'designation_overlap' THEN env.designation_overlap
-                WHEN v_sort = 'environment' AND v_metric = 'flood_risk'          THEN env.flood_risk
-                WHEN v_sort = 'environment' AND v_metric = 'landslide_risk'      THEN env.landslide_risk
+                WHEN v_sort = 'environment' AND v_metric = 'water_proximity'    THEN c.water_proximity
+                WHEN v_sort = 'environment' AND v_metric = 'aquifer_productivity' THEN c.aquifer_productivity
+                -- flood_risk and landslide_risk moved to planning (P2-22)
+                -- WHEN v_sort = 'environment' AND v_metric = 'flood_risk'          THEN env.flood_risk
+                -- WHEN v_sort = 'environment' AND v_metric = 'landslide_risk'      THEN env.landslide_risk
                 -- ── COOLING ─────────────────────────────────────────────
                 WHEN v_sort = 'cooling' AND v_metric = 'score'              THEN c.score
-                WHEN v_sort = 'cooling' AND v_metric = 'water_proximity'    THEN c.water_proximity
-                WHEN v_sort = 'cooling' AND v_metric = 'aquifer_productivity' THEN c.aquifer_productivity
+                -- water_proximity and aquifer_productivity moved to environment (P2-22)
+                -- WHEN v_sort = 'cooling' AND v_metric = 'water_proximity'    THEN c.water_proximity
+                -- WHEN v_sort = 'cooling' AND v_metric = 'aquifer_productivity' THEN c.aquifer_productivity
                 WHEN v_sort = 'cooling' AND v_metric = 'rainfall'           THEN
                     (c.rainfall - mr.min_val) / NULLIF(mr.max_val - mr.min_val, 0) * 100
                 WHEN v_sort = 'cooling' AND v_metric = 'temperature'        THEN
@@ -69,10 +79,13 @@ BEGIN
                 WHEN v_sort = 'connectivity' AND v_metric = 'broadband'    THEN cn.broadband
                 WHEN v_sort = 'connectivity' AND v_metric = 'ix_distance'  THEN cn.ix_distance
                 WHEN v_sort = 'connectivity' AND v_metric = 'road_access'  THEN cn.road_access
+                WHEN v_sort = 'connectivity' AND v_metric = 'grid_proximity' THEN e.grid_proximity
                 -- ── PLANNING ─────────────────────────────────────────────
                 WHEN v_sort = 'planning' AND v_metric = 'score'              THEN p.score
                 WHEN v_sort = 'planning' AND v_metric = 'zoning_tier'        THEN p.zoning_tier
                 WHEN v_sort = 'planning' AND v_metric = 'planning_precedent' THEN p.planning_precedent
+                WHEN v_sort = 'planning' AND v_metric = 'flood_risk'         THEN env.flood_risk
+                WHEN v_sort = 'planning' AND v_metric = 'landslide_risk'     THEN env.landslide_risk
                 WHEN v_sort = 'planning' AND v_metric = 'land_price'         THEN p.land_price_score
                 WHEN v_sort = 'planning' AND v_metric = 'avg_price_per_sqm_eur' THEN
                     -- INVERTED: lower €/m² = better for siting = higher score

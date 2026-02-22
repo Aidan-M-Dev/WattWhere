@@ -159,20 +159,29 @@ async def _get_energy(conn: asyncpg.Connection, tile_id: int, base: dict) -> dic
         "wind_speed_100m": _f(row["wind_speed_100m"]),
         "wind_speed_150m": _f(row["wind_speed_150m"]),
         "solar_ghi": _f(row["solar_ghi"]),
-        "grid_proximity": _f(row["grid_proximity"]),
+        # grid_proximity moved to connectivity (P2-22) — detail fields remain for sidebar
         "nearest_transmission_line_km": _f(row["nearest_transmission_line_km"]),
         "nearest_substation_km": _f(row["nearest_substation_km"]),
         "nearest_substation_name": row["nearest_substation_name"],
         "nearest_substation_voltage": row["nearest_substation_voltage"],
         "grid_low_confidence": row["grid_low_confidence"],
+        "renewable_score": _f(row["renewable_score"]),
+        "renewable_pct": _f(row["renewable_pct"]),
+        "renewable_capacity_mw": _f(row["renewable_capacity_mw"]),
+        "fossil_capacity_mw": _f(row["fossil_capacity_mw"]),
     }
 
 
 async def _get_environment(conn: asyncpg.Connection, tile_id: int, base: dict) -> dict:
-    """Fetch environment_scores + tile_designation_overlaps for environment sidebar."""
+    """Fetch environment_scores + cooling cross-metrics + tile_designation_overlaps for environment sidebar."""
     row = await conn.fetchrow("SELECT * FROM environment_scores WHERE tile_id = $1", tile_id)
     if not row:
         raise HTTPException(status_code=404, detail=f"No environment score for tile {tile_id}")
+
+    # P2-22: water_proximity + aquifer_productivity moved here from cooling
+    cool_row = await conn.fetchrow(
+        "SELECT water_proximity, aquifer_productivity FROM cooling_scores WHERE tile_id = $1", tile_id
+    )
 
     designations = await conn.fetch(
         "SELECT designation_type, designation_name, designation_id, pct_overlap FROM tile_designation_overlaps WHERE tile_id = $1 ORDER BY pct_overlap DESC",
@@ -183,8 +192,7 @@ async def _get_environment(conn: asyncpg.Connection, tile_id: int, base: dict) -
         **base,
         "score": float(row["score"]),
         "designation_overlap": _f(row["designation_overlap"]),
-        "flood_risk": _f(row["flood_risk"]),
-        "landslide_risk": _f(row["landslide_risk"]),
+        # flood_risk and landslide_risk moved to planning (P2-22)
         "has_hard_exclusion": row["has_hard_exclusion"],
         "exclusion_reason": row["exclusion_reason"],
         "intersects_sac": row["intersects_sac"],
@@ -195,6 +203,9 @@ async def _get_environment(conn: asyncpg.Connection, tile_id: int, base: dict) -
         "intersects_future_flood": row["intersects_future_flood"],
         "landslide_susceptibility": row["landslide_susceptibility"],
         "designations": [dict(d) for d in designations],
+        # Moved from cooling (P2-22)
+        "water_proximity": _f(cool_row["water_proximity"]) if cool_row else None,
+        "aquifer_productivity": _f(cool_row["aquifer_productivity"]) if cool_row else None,
     }
 
 
@@ -208,9 +219,8 @@ async def _get_cooling(conn: asyncpg.Connection, tile_id: int, base: dict) -> di
         **base,
         "score": float(row["score"]),
         "temperature": _f(row["temperature"]),
-        "water_proximity": _f(row["water_proximity"]),
         "rainfall": _f(row["rainfall"]),
-        "aquifer_productivity": _f(row["aquifer_productivity"]),
+        # water_proximity and aquifer_productivity moved to environment (P2-22)
         "free_cooling_hours": _f(row["free_cooling_hours"]),
         "nearest_waterbody_name": row["nearest_waterbody_name"],
         "nearest_waterbody_km": _f(row["nearest_waterbody_km"]),
@@ -221,10 +231,15 @@ async def _get_cooling(conn: asyncpg.Connection, tile_id: int, base: dict) -> di
 
 
 async def _get_connectivity(conn: asyncpg.Connection, tile_id: int, base: dict) -> dict:
-    """Fetch connectivity_scores for connectivity sidebar."""
+    """Fetch connectivity_scores + energy cross-metrics for connectivity sidebar."""
     row = await conn.fetchrow("SELECT * FROM connectivity_scores WHERE tile_id = $1", tile_id)
     if not row:
         raise HTTPException(status_code=404, detail=f"No connectivity score for tile {tile_id}")
+
+    # P2-22: grid_proximity moved here from energy
+    energy_row = await conn.fetchrow(
+        "SELECT grid_proximity FROM energy_scores WHERE tile_id = $1", tile_id
+    )
 
     return {
         **base,
@@ -239,14 +254,21 @@ async def _get_connectivity(conn: asyncpg.Connection, tile_id: int, base: dict) 
         "nearest_motorway_junction_name": row["nearest_motorway_junction_name"],
         "nearest_national_road_km": _f(row["nearest_national_road_km"]),
         "nearest_rail_freight_km": _f(row["nearest_rail_freight_km"]),
+        # Moved from energy (P2-22)
+        "grid_proximity": _f(energy_row["grid_proximity"]) if energy_row else None,
     }
 
 
 async def _get_planning(conn: asyncpg.Connection, tile_id: int, base: dict) -> dict:
-    """Fetch planning_scores + tile_planning_applications for planning sidebar."""
+    """Fetch planning_scores + environment cross-metrics + tile_planning_applications for planning sidebar."""
     row = await conn.fetchrow("SELECT * FROM planning_scores WHERE tile_id = $1", tile_id)
     if not row:
         raise HTTPException(status_code=404, detail=f"No planning score for tile {tile_id}")
+
+    # P2-22: flood_risk + landslide_risk moved here from environment
+    env_row = await conn.fetchrow(
+        "SELECT flood_risk, landslide_risk FROM environment_scores WHERE tile_id = $1", tile_id
+    )
 
     apps = await conn.fetch(
         "SELECT app_ref, name, status, app_date, app_type FROM tile_planning_applications WHERE tile_id = $1 ORDER BY app_date DESC NULLS LAST",
@@ -258,6 +280,9 @@ async def _get_planning(conn: asyncpg.Connection, tile_id: int, base: dict) -> d
         "score": float(row["score"]),
         "zoning_tier": _f(row["zoning_tier"]),
         "planning_precedent": _f(row["planning_precedent"]),
+        # Moved from environment (P2-22)
+        "flood_risk": _f(env_row["flood_risk"]) if env_row else None,
+        "landslide_risk": _f(env_row["landslide_risk"]) if env_row else None,
         "pct_industrial": float(row["pct_industrial"]),
         "pct_enterprise": float(row["pct_enterprise"]),
         "pct_mixed_use": float(row["pct_mixed_use"]),

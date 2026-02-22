@@ -90,7 +90,11 @@ CREATE TABLE energy_scores (
     nearest_substation_km         NUMERIC(8,3),
     nearest_substation_name       TEXT,
     nearest_substation_voltage    TEXT,
-    grid_low_confidence           BOOLEAN       NOT NULL DEFAULT false  -- true if nearest infra > 20 km
+    grid_low_confidence           BOOLEAN       NOT NULL DEFAULT false,  -- true if nearest infra > 20 km
+    renewable_pct                 REAL,                                   -- % renewable capacity within radius
+    renewable_score               SMALLINT      CHECK (renewable_score BETWEEN 0 AND 100),
+    renewable_capacity_mw         REAL,
+    fossil_capacity_mw            REAL
 );
 
 CREATE TABLE environment_scores (

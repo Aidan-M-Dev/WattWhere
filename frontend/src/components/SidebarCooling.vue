@@ -42,10 +42,7 @@
 
     <section class="section">
       <h3 class="section__title">Water Resources <a href="https://gis.epa.ie/GetData/Download" target="_blank" rel="noopener" class="source-link">source ↗</a></h3>
-      <div class="kv-row">
-        <span class="kv-row__label">Water proximity score</span>
-        <span class="kv-row__value">{{ data.water_proximity?.toFixed(0) ?? '—' }}/100</span>
-      </div>
+      <!-- water_proximity score moved to Environment sort (P2-22) -->
       <div class="kv-row" v-if="data.nearest_waterbody_name">
         <span class="kv-row__label">Nearest waterbody</span>
         <span class="kv-row__value">{{ data.nearest_waterbody_name }}</span>
@@ -75,10 +72,7 @@
         <span class="kv-row__label">Aquifer productivity</span>
         <span class="kv-row__value">{{ data.aquifer_productivity_rating ?? '—' }}</span>
       </div>
-      <div class="kv-row">
-        <span class="kv-row__label">Productivity score</span>
-        <span class="kv-row__value">{{ data.aquifer_productivity?.toFixed(0) ?? '—' }}/100</span>
-      </div>
+      <!-- aquifer_productivity score moved to Environment sort (P2-22) -->
     </section>
   </div>
 </template>

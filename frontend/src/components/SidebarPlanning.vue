@@ -59,6 +59,19 @@
       <div class="no-data" v-else>No planning applications in this tile</div>
     </section>
 
+    <!-- Natural Hazards (moved from Environment, P2-22) -->
+    <section class="section">
+      <h3 class="section__title">Natural Hazards <a href="https://www.floodinfo.ie" target="_blank" rel="noopener" class="source-link">source ↗</a></h3>
+      <div class="kv-row">
+        <span class="kv-row__label">Flood risk score</span>
+        <span class="kv-row__value">{{ data.flood_risk?.toFixed(0) ?? '—' }}<span class="kv-row__unit">/100</span></span>
+      </div>
+      <div class="kv-row">
+        <span class="kv-row__label">Landslide risk score</span>
+        <span class="kv-row__value">{{ data.landslide_risk?.toFixed(0) ?? '—' }}<span class="kv-row__unit">/100</span></span>
+      </div>
+    </section>
+
     <!-- Land Pricing -->
     <section class="section" v-if="data.land_price_score !== null || data.avg_price_per_sqm_eur !== null">
       <h3 class="section__title">Land Pricing <a href="https://www.propertypriceregister.ie" target="_blank" rel="noopener" class="source-link">source ↗</a></h3>

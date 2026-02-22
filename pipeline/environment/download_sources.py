@@ -15,11 +15,10 @@ Run: python environment/download_sources.py
      (saves to /data/environment/ — re-run is idempotent, skips existing files)
 """
 
+import subprocess
 import sys
-import io
 import shutil
 import zipfile
-import urllib.request
 from pathlib import Path
 
 import geopandas as gpd
@@ -52,40 +51,34 @@ URLS = {
 
 # ── Helpers ─────────────────────────────────────────────────────────────────────
 
-def _get(url: str, timeout: int = 300) -> bytes:
-    req = urllib.request.Request(url, headers={"User-Agent": "HackEurope-pipeline/1.0"})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        total = int(resp.headers.get("Content-Length", 0))
-        data = b""
-        chunk = 65536
-        while True:
-            block = resp.read(chunk)
-            if not block:
-                break
-            data += block
-            if total:
-                pct = 100 * len(data) / total
-                print(f"\r    {len(data)//1_048_576} / {total//1_048_576} MB ({pct:.0f}%)  ", end="", flush=True)
-    print()
-    return data
+def _wget(url: str, dest: Path, timeout: int = 600) -> None:
+    """Download url to dest using wget. Shows progress bar natively."""
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    result = subprocess.run(
+        ["wget", "--progress=bar:force:noscroll", "-O", str(dest), url],
+        timeout=timeout,
+    )
+    if result.returncode != 0:
+        dest.unlink(missing_ok=True)
+        raise RuntimeError(f"wget failed (exit {result.returncode}) for {url}")
 
 
-def _zip_to_gpkg(data: bytes, out_path: Path) -> gpd.GeoDataFrame:
-    """Extract the first .shp from a ZIP and return as a GeoDataFrame."""
-    extract_dir = out_path.parent / "_tmp_extract"
+def _zip_to_gdf(zip_path: Path) -> gpd.GeoDataFrame:
+    """Extract the first .shp from a ZIP file on disk and return as a GeoDataFrame."""
+    extract_dir = zip_path.parent / "_tmp_extract"
     extract_dir.mkdir(parents=True, exist_ok=True)
     try:
-        with zipfile.ZipFile(io.BytesIO(data)) as zf:
+        with zipfile.ZipFile(zip_path) as zf:
             shp_names = [n for n in zf.namelist() if n.lower().endswith(".shp")]
             if not shp_names:
-                raise RuntimeError("No .shp file found in ZIP")
+                raise RuntimeError(f"No .shp file found in {zip_path}")
             zf.extractall(extract_dir)
 
         shp_file = extract_dir / shp_names[0]
-        gdf = gpd.read_file(str(shp_file))
-        return gdf
+        return gpd.read_file(str(shp_file))
     finally:
         shutil.rmtree(extract_dir, ignore_errors=True)
+        zip_path.unlink(missing_ok=True)
 
 
 
@@ -96,8 +89,9 @@ def download_npws_sac() -> None:
         print(f"[sac] Already present: {NPWS_SAC_FILE}")
         return
     print(f"[sac] Downloading NPWS SAC boundaries...")
-    data = _get(URLS["sac"])
-    gdf = _zip_to_gpkg(data, NPWS_SAC_FILE)
+    tmp = NPWS_SAC_FILE.parent / "_tmp_sac.zip"
+    _wget(URLS["sac"], tmp)
+    gdf = _zip_to_gdf(tmp)
     print(f"    {len(gdf)} SAC polygons  CRS={gdf.crs}")
     NPWS_SAC_FILE.parent.mkdir(parents=True, exist_ok=True)
     gdf.to_file(str(NPWS_SAC_FILE), driver="GPKG")
@@ -109,8 +103,9 @@ def download_npws_spa() -> None:
         print(f"[spa] Already present: {NPWS_SPA_FILE}")
         return
     print(f"[spa] Downloading NPWS SPA boundaries...")
-    data = _get(URLS["spa"])
-    gdf = _zip_to_gpkg(data, NPWS_SPA_FILE)
+    tmp = NPWS_SPA_FILE.parent / "_tmp_spa.zip"
+    _wget(URLS["spa"], tmp)
+    gdf = _zip_to_gdf(tmp)
     print(f"    {len(gdf)} SPA polygons  CRS={gdf.crs}")
     NPWS_SPA_FILE.parent.mkdir(parents=True, exist_ok=True)
     gdf.to_file(str(NPWS_SPA_FILE), driver="GPKG")
@@ -124,14 +119,16 @@ def download_npws_nha() -> None:
         return
 
     print(f"[nha] Downloading NPWS NHA boundaries...")
-    nha_data = _get(URLS["nha"])
-    nha_gdf = _zip_to_gpkg(nha_data, NPWS_NHA_FILE)
+    tmp_nha = NPWS_NHA_FILE.parent / "_tmp_nha.zip"
+    _wget(URLS["nha"], tmp_nha)
+    nha_gdf = _zip_to_gdf(tmp_nha)
     nha_gdf["SITE_TYPE"] = "NHA"
     print(f"    {len(nha_gdf)} NHA polygons  CRS={nha_gdf.crs}")
 
     print(f"[nha] Downloading NPWS pNHA boundaries...")
-    pnha_data = _get(URLS["pnha"])
-    pnha_gdf = _zip_to_gpkg(pnha_data, NPWS_NHA_FILE)
+    tmp_pnha = NPWS_NHA_FILE.parent / "_tmp_pnha.zip"
+    _wget(URLS["pnha"], tmp_pnha)
+    pnha_gdf = _zip_to_gdf(tmp_pnha)
     pnha_gdf["SITE_TYPE"] = "pNHA"
     print(f"    {len(pnha_gdf)} pNHA polygons  CRS={pnha_gdf.crs}")
 
@@ -160,8 +157,9 @@ def download_opw_flood_current() -> None:
         print(f"[flood_current] Already present: {OPW_FLOOD_CURRENT_FILE}")
         return
     print(f"[flood_current] Downloading OPW NIFM current flood extents (CC BY-NC-ND)...")
-    data = _get(URLS["flood_current"])
-    gdf = _zip_to_gpkg(data, OPW_FLOOD_CURRENT_FILE)
+    tmp = OPW_FLOOD_CURRENT_FILE.parent / "_tmp_flood_current.zip"
+    _wget(URLS["flood_current"], tmp)
+    gdf = _zip_to_gdf(tmp)
     print(f"    {len(gdf)} current flood polygons  CRS={gdf.crs}")
     OPW_FLOOD_CURRENT_FILE.parent.mkdir(parents=True, exist_ok=True)
     gdf.to_file(str(OPW_FLOOD_CURRENT_FILE), driver="GPKG")
@@ -175,8 +173,9 @@ def download_opw_flood_future() -> None:
         print(f"[flood_future] Already present: {OPW_FLOOD_FUTURE_FILE}")
         return
     print(f"[flood_future] Downloading OPW NIFM future flood extents (CC BY-NC-ND)...")
-    data = _get(URLS["flood_future"])
-    gdf = _zip_to_gpkg(data, OPW_FLOOD_FUTURE_FILE)
+    tmp = OPW_FLOOD_FUTURE_FILE.parent / "_tmp_flood_future.zip"
+    _wget(URLS["flood_future"], tmp)
+    gdf = _zip_to_gdf(tmp)
     print(f"    {len(gdf)} future flood polygons  CRS={gdf.crs}")
     OPW_FLOOD_FUTURE_FILE.parent.mkdir(parents=True, exist_ok=True)
     gdf.to_file(str(OPW_FLOOD_FUTURE_FILE), driver="GPKG")
@@ -190,7 +189,6 @@ def download_gsi_landslide() -> None:
     Key field: LSSUSCLASS (1=Low, 2=Medium, 3=High). Source: gsi.geodata.gov.ie
     Layer: IE_GSI_Landslide_Susceptibility_Classification_50K_IE26_ITM
     """
-    import subprocess
     if GSI_LANDSLIDE_FILE.exists():
         print(f"[landslide] Already present: {GSI_LANDSLIDE_FILE}")
         return

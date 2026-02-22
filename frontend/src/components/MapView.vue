@@ -47,6 +47,7 @@ import maplibregl from 'maplibre-gl'
 import { useSuitabilityStore } from '@/stores/suitability'
 import { useToast } from '@/composables/useToast'
 import { COLOR_RAMPS, TEMPERATURE_RAMP } from '@/types'
+import type { CustomMetric } from '@/types'
 import MapLegend from '@/components/MapLegend.vue'
 import irelandCounties from '@/assets/ireland-counties.json'
 
@@ -56,6 +57,7 @@ const { push: pushToast } = useToast()
 const mapEl = ref<HTMLDivElement | null>(null)
 let map: maplibregl.Map | null = null
 let hoveredTileId: number | null = null
+let customSourceIds: string[] = []
 
 // Ireland's bounding box (WGS84). Used for the soft viewport pull-back.
 const IRELAND_BBOX = { west: -10.7, east: -5.8, south: 51.2, north: 55.6 }
@@ -319,6 +321,11 @@ function setupInteractions() {
     // Update selected tile filter
     map!.setFilter('tiles-selected', ['==', ['get', 'tile_id'], tileId])
 
+    // For custom mode, capture normalised metric scores from vector tile sources
+    if (store.activeSort === 'custom') {
+      store.setCustomTileScores(getCustomTileScores(tileId))
+    }
+
     // Dispatch to store — fetches tile detail + opens sidebar
     await store.setSelectedTile(tileId)
 
@@ -373,6 +380,14 @@ function setupInteractions() {
       })
     }
   })
+
+  // Custom blend: recompute on every idle while custom mode is active.
+  // 'idle' fires after all tiles (including custom metric sources) have loaded.
+  map.on('idle', () => {
+    if (store.activeSort === 'custom' && store.customMetricsApplied.length) {
+      computeCustomBlend()
+    }
+  })
 }
 
 // ── Colour expression builder ─────────────────────────────────
@@ -400,6 +415,106 @@ function buildColorExpression(): maplibregl.ExpressionSpecification {
   ] as maplibregl.ExpressionSpecification
 }
 
+// ── Custom combination blend logic ───────────────────────────
+
+/** Add hidden vector tile sources for each selected custom metric */
+function setupCustomSources(metrics: CustomMetric[]) {
+  if (!map || !map.isStyleLoaded()) return
+  cleanupCustomSources()
+  if (!metrics.length) return
+
+  for (let i = 0; i < metrics.length; i++) {
+    const cm = metrics[i]
+    const sourceId = `custom-metric-${i}`
+    map.addSource(sourceId, {
+      type: 'vector',
+      tiles: [`${window.location.origin}/tiles/tile_heatmap/{z}/{x}/{y}?sort=${cm.sort}&metric=${cm.metric}`],
+      minzoom: 0,
+      maxzoom: 14,
+    })
+    customSourceIds.push(sourceId)
+  }
+}
+
+/** Remove all custom metric sources from the map */
+function cleanupCustomSources() {
+  if (!map) return
+  for (const id of customSourceIds) {
+    if (map.getSource(id)) map.removeSource(id)
+  }
+  customSourceIds = []
+}
+
+/**
+ * Client-side tile blending: read normalised values from each custom metric
+ * source, compute weighted average per tile_id, update fill-color via match expression.
+ * Called on every 'idle' event while custom mode is active.
+ */
+function computeCustomBlend() {
+  if (!map || !map.isStyleLoaded()) return
+  const metrics = store.customMetricsApplied
+  if (!metrics.length || customSourceIds.length !== metrics.length) return
+
+  const tileValues = new Map<number, (number | null)[]>()
+  const n = metrics.length
+
+  for (let i = 0; i < n; i++) {
+    try {
+      const features = map.querySourceFeatures(customSourceIds[i], { sourceLayer: 'tile_heatmap' })
+      for (const f of features) {
+        const tid = f.properties?.tile_id as number
+        if (tid == null) continue
+        if (!tileValues.has(tid)) tileValues.set(tid, new Array(n).fill(null))
+        tileValues.get(tid)![i] = (f.properties?.value as number) ?? 0
+      }
+    } catch { /* source not loaded yet */ }
+  }
+
+  const totalWeight = metrics.reduce((s, cm) => s + cm.weight, 0)
+  if (totalWeight === 0) return
+
+  const matchPairs: number[] = []
+  for (const [tid, values] of tileValues) {
+    let weighted = 0
+    let complete = true
+    for (let i = 0; i < n; i++) {
+      if (values[i] == null) { complete = false; break }
+      weighted += (values[i]! / totalWeight) * metrics[i].weight
+    }
+    if (complete) {
+      matchPairs.push(tid, Math.round(Math.max(0, Math.min(100, weighted))))
+    }
+  }
+
+  if (!matchPairs.length) return
+
+  const ramp = COLOR_RAMPS['custom']
+  map.setPaintProperty('tiles-fill', 'fill-color', [
+    'interpolate', ['linear'],
+    ['match', ['get', 'tile_id'], ...matchPairs, 0],
+    ...ramp.stops.flatMap(([stop, color]) => [stop, color]),
+  ] as unknown as maplibregl.ExpressionSpecification)
+}
+
+/** Read normalised scores from custom sources for a specific tile (used on click) */
+function getCustomTileScores(tileId: number): Map<string, number> {
+  const scores = new Map<string, number>()
+  if (!map) return scores
+  const metrics = store.customMetricsApplied
+
+  for (let i = 0; i < customSourceIds.length && i < metrics.length; i++) {
+    try {
+      const features = map.querySourceFeatures(customSourceIds[i], { sourceLayer: 'tile_heatmap' })
+      const f = features.find(f => f.properties?.tile_id === tileId)
+      if (f) {
+        scores.set(`${metrics[i].sort}:${metrics[i].metric}`, (f.properties?.value as number) ?? 0)
+      }
+    } catch { /* source not loaded */ }
+  }
+
+  return scores
+}
+
 // ── Reactive watchers ─────────────────────────────────────────
 
 // When martinTileUrl changes (sort or metric switch), tell the tile source to fetch new tiles.
@@ -411,7 +526,18 @@ watch(() => store.martinTileUrl, (newUrl) => {
   const source = map.getSource('tiles-mvt') as maplibregl.VectorTileSource
   source.setTiles([newUrl])
   map.setPaintProperty('tiles-fill', 'fill-color', buildColorExpression())
+  // Clean up custom sources when switching away from custom
+  if (store.activeSort !== 'custom') {
+    cleanupCustomSources()
+  }
 })
+
+// When custom metrics are applied, set up hidden vector tile sources for blending
+watch(() => store.customMetricsApplied, (metrics) => {
+  if (!map || !map.isStyleLoaded()) return
+  if (store.activeSort !== 'custom') return
+  setupCustomSources(metrics)
+}, { deep: true })
 
 // When pins data changes (after a sort switch), update the GeoJSON source with new pin features.
 // The store fetches new pins whenever setActiveSort() is called. This watcher feeds that new

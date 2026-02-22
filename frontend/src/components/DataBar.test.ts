@@ -38,7 +38,7 @@ const MOCK_SORTS_META: SortMeta[] = [
     metrics: [
       { key: 'score', label: 'Constraint score', unit: '0–100', isDefault: true },
       { key: 'designation_overlap', label: 'Designation severity', unit: '0–100', isDefault: false },
-      { key: 'flood_risk', label: 'Flood risk', unit: '0–100', isDefault: false },
+      { key: 'water_proximity', label: 'Water proximity', unit: '0–100', isDefault: false },
     ],
   },
   {
@@ -73,8 +73,8 @@ const mockStore = vi.hoisted(() => ({
   activeMetric: 'score',
   activeSortMeta: null as SortMeta | null,
   loading: false,
-  setActiveSort: vi.fn<[SortType], Promise<void>>(),
-  setActiveMetric: vi.fn<[string], Promise<void>>(),
+  setActiveSort: vi.fn<(sort: SortType) => Promise<void>>(),
+  setActiveMetric: vi.fn<(metric: string) => Promise<void>>(),
 }))
 
 vi.mock('@/stores/suitability', () => ({

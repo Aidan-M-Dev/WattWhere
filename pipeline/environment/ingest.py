@@ -36,6 +36,7 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 import sqlalchemy
+import shapely
 from shapely.strtree import STRtree
 from sqlalchemy import text
 from tqdm import tqdm
@@ -123,8 +124,8 @@ def _compute_type_overlaps(
     """
     Compute tile-level intersection rows for one designation type.
 
-    Uses STRtree to pre-filter candidates before exact intersection —
-    much faster than gpd.overlay() on large polygon datasets.
+    Uses Shapely 2.x bulk STRtree.query + vectorized intersection/area —
+    all heavy geometry work happens in C, no Python per-tile loop.
 
     Returns list of dicts with keys:
       tile_id, designation_type, designation_name, designation_id, pct_overlap
@@ -132,46 +133,52 @@ def _compute_type_overlaps(
     if len(des_gdf) == 0:
         return []
 
-    des_geoms = des_gdf.geometry.values.tolist()
-    tree = STRtree(des_geoms)
+    tree = STRtree(des_gdf.geometry.values)
+    tile_idxs, des_idxs = tree.query(tiles.geometry.values, predicate="intersects")
+
+    if len(tile_idxs) == 0:
+        return []
+
+    # Vectorized intersection + area (single C-level pass)
+    isect = shapely.intersection(
+        tiles.geometry.values[tile_idxs],
+        des_gdf.geometry.values[des_idxs],
+    )
+    areas = shapely.area(isect)
+
+    # Filter out empty intersections
+    mask = areas > 0
+    tile_idxs = tile_idxs[mask]
+    des_idxs = des_idxs[mask]
+    areas = areas[mask]
+
+    # Pre-extract name/code arrays to avoid slow iloc per row
+    tile_ids = tiles["tile_id"].values
+    names = des_gdf[name_col].astype(str).values if name_col else None
+    codes = (
+        des_gdf[code_col].astype(str).values
+        if code_col and code_col in des_gdf.columns
+        else None
+    )
+
     rows = []
+    for i in range(len(tile_idxs)):
+        pct = min(100.0, float(areas[i] / TILE_SIZE_M2) * 100.0)
 
-    for tile_row in tqdm(
-        tiles.itertuples(), total=len(tiles), desc=f"  {des_type}", leave=False
-    ):
-        tile_id = int(tile_row.tile_id)
-        tile_geom = tile_row.geometry
+        name = names[des_idxs[i]] if names is not None else f"Unknown {des_type}"
+        if not name or name == "nan":
+            name = f"Unknown {des_type}"
+        code = codes[des_idxs[i]] if codes is not None else None
+        if code == "nan":
+            code = None
 
-        # Bounding-box candidates via STRtree
-        candidate_idxs = tree.query(tile_geom, predicate="intersects")
-        if len(candidate_idxs) == 0:
-            continue
-
-        for idx in candidate_idxs:
-            des_geom = des_geoms[idx]
-            if not tile_geom.intersects(des_geom):
-                continue
-            intersection = tile_geom.intersection(des_geom)
-            if intersection.is_empty:
-                continue
-
-            pct = min(100.0, float(intersection.area / TILE_SIZE_M2) * 100.0)
-            des_row = des_gdf.iloc[idx]
-
-            name = str(des_row[name_col]) if name_col else f"Unknown {des_type}"
-            if not name or name == "nan":
-                name = f"Unknown {des_type}"
-            code = str(des_row[code_col]) if code_col and code_col in des_row.index else None
-            if code == "nan":
-                code = None
-
-            rows.append({
-                "tile_id": tile_id,
-                "designation_type": des_type,
-                "designation_name": name,
-                "designation_id": code,
-                "pct_overlap": round(pct, 2),
-            })
+        rows.append({
+            "tile_id": int(tile_ids[tile_idxs[i]]),
+            "designation_type": des_type,
+            "designation_name": name,
+            "designation_id": code,
+            "pct_overlap": round(pct, 2),
+        })
 
     return rows
 
@@ -288,6 +295,21 @@ def compute_designation_overlaps(
     return pd.DataFrame(records)
 
 
+def _prep_flood_vector(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    """
+    Fast-path prep for flood data: reproject, make_valid (skip buffer(0)),
+    simplify to 50 m tolerance (plenty for 5 km grid), drop empties.
+    Skips explode — STRtree handles MultiPolygons natively.
+    """
+    if gdf.crs is None:
+        gdf = gdf.set_crs("EPSG:4326")
+    gdf = gdf.to_crs(GRID_CRS_ITM)
+    gdf["geometry"] = shapely.make_valid(gdf.geometry.values)
+    gdf["geometry"] = shapely.simplify(gdf.geometry.values, tolerance=50.0)
+    gdf = gdf[~gdf.geometry.is_empty].reset_index(drop=True)
+    return gdf
+
+
 def compute_flood_risk(
     tiles: gpd.GeoDataFrame,
     flood_current: gpd.GeoDataFrame,
@@ -303,58 +325,41 @@ def compute_flood_risk(
     """
     tiles = tiles.to_crs(GRID_CRS_ITM) if tiles.crs.to_epsg() != 2157 else tiles
 
-    flood_cur_clean = _prep_vector(flood_current)
-    flood_fut_clean = _prep_vector(flood_future)
+    flood_cur_clean = _prep_flood_vector(flood_current)
+    flood_fut_clean = _prep_flood_vector(flood_future)
 
-    def _boolean_intersect(tiles_gdf: gpd.GeoDataFrame, zone_gdf: gpd.GeoDataFrame, label: str) -> set[int]:
-        """Return set of tile_ids that intersect any polygon in zone_gdf."""
+    def _boolean_intersect(tiles_gdf: gpd.GeoDataFrame, zone_gdf: gpd.GeoDataFrame) -> set[int]:
+        """Return set of tile_ids that intersect any polygon in zone_gdf.
+        Uses Shapely 2.x bulk query — single C-level call instead of Python loop."""
         if len(zone_gdf) == 0:
             return set()
-        zone_geoms = zone_gdf.geometry.values.tolist()
-        tree = STRtree(zone_geoms)
-        hit_tiles = set()
-        for tile_row in tqdm(
-            tiles_gdf.itertuples(), total=len(tiles_gdf), desc=f"  Flood {label}", leave=False
-        ):
-            tile_geom = tile_row.geometry
-            candidates = tree.query(tile_geom, predicate="intersects")
-            if len(candidates) > 0:
-                # At least one candidate → confirm exact intersection
-                for idx in candidates:
-                    if tile_geom.intersects(zone_geoms[idx]):
-                        hit_tiles.add(int(tile_row.tile_id))
-                        break
-        return hit_tiles
+        tree = STRtree(zone_gdf.geometry.values)
+        tile_idxs, _ = tree.query(tiles_gdf.geometry.values, predicate="intersects")
+        return set(tiles_gdf["tile_id"].values[tile_idxs].astype(int))
 
     print("  Computing current flood zone intersections...")
-    current_tiles = _boolean_intersect(tiles, flood_cur_clean, "current")
+    current_tiles = _boolean_intersect(tiles, flood_cur_clean)
     print(f"    {len(current_tiles)} tiles intersect current flood zone")
 
     print("  Computing future flood zone intersections...")
-    future_tiles = _boolean_intersect(tiles, flood_fut_clean, "future")
+    future_tiles = _boolean_intersect(tiles, flood_fut_clean)
     print(f"    {len(future_tiles)} tiles intersect future flood zone")
 
-    records = []
-    for tile_row in tiles.itertuples():
-        tile_id = int(tile_row.tile_id)
-        is_current = tile_id in current_tiles
-        is_future = tile_id in future_tiles
+    # Vectorized result building (no Python per-tile loop)
+    tile_ids = tiles["tile_id"].values.astype(int)
+    is_current = np.isin(tile_ids, np.array(list(current_tiles), dtype=int)) if current_tiles else np.zeros(len(tile_ids), dtype=bool)
+    is_future = np.isin(tile_ids, np.array(list(future_tiles), dtype=int)) if future_tiles else np.zeros(len(tile_ids), dtype=bool)
 
-        if is_current:
-            flood_score = 0.0
-        elif is_future:
-            flood_score = 40.0
-        else:
-            flood_score = 100.0
+    flood_score = np.full(len(tile_ids), 100.0)
+    flood_score[is_future] = 40.0
+    flood_score[is_current] = 0.0
 
-        records.append({
-            "tile_id": tile_id,
-            "intersects_current_flood": is_current,
-            "intersects_future_flood": is_future,
-            "flood_risk": flood_score,
-        })
-
-    return pd.DataFrame(records)
+    return pd.DataFrame({
+        "tile_id": tile_ids,
+        "intersects_current_flood": is_current,
+        "intersects_future_flood": is_future,
+        "flood_risk": flood_score,
+    })
 
 
 def compute_landslide_risk(
@@ -421,50 +426,43 @@ def compute_landslide_risk(
 
     ls_clean["_susc_norm"] = ls_clean["_susc_norm"].apply(_canonical)
 
-    # STRtree majority join: for each tile, find the dominant susceptibility class
-    ls_geoms = ls_clean.geometry.values.tolist()
-    tree = STRtree(ls_geoms)
+    # Bulk STRtree query + vectorized intersection for area-weighted majority vote
+    tree = STRtree(ls_clean.geometry.values)
+    tile_idxs, ls_idxs = tree.query(tiles.geometry.values, predicate="intersects")
 
-    records = []
-    for tile_row in tqdm(
-        tiles.itertuples(), total=len(tiles), desc="  Landslide", leave=False
-    ):
-        tile_id = int(tile_row.tile_id)
-        tile_geom = tile_row.geometry
+    all_tile_ids = tiles["tile_id"].values.astype(int)
 
-        candidates = tree.query(tile_geom, predicate="intersects")
-        if len(candidates) == 0:
-            records.append({
-                "tile_id": tile_id,
-                "landslide_susceptibility": DEFAULT_CLASS,
-                "landslide_risk": SCORE_MAP[DEFAULT_CLASS],
-            })
-            continue
-
-        # Area-weighted majority vote
-        class_area: dict[str, float] = defaultdict(float)
-        for idx in candidates:
-            ls_geom = ls_geoms[idx]
-            if not tile_geom.intersects(ls_geom):
-                continue
-            intersection = tile_geom.intersection(ls_geom)
-            if intersection.is_empty:
-                continue
-            cls = ls_clean.iloc[idx]["_susc_norm"]
-            class_area[cls] += intersection.area
-
-        if not class_area:
-            dominant = DEFAULT_CLASS
-        else:
-            dominant = max(class_area, key=class_area.__getitem__)
-
-        records.append({
-            "tile_id": tile_id,
-            "landslide_susceptibility": dominant,
-            "landslide_risk": SCORE_MAP.get(dominant, SCORE_MAP[DEFAULT_CLASS]),
+    if len(tile_idxs) == 0:
+        return pd.DataFrame({
+            "tile_id": all_tile_ids,
+            "landslide_susceptibility": DEFAULT_CLASS,
+            "landslide_risk": SCORE_MAP[DEFAULT_CLASS],
         })
 
-    return pd.DataFrame(records)
+    # Vectorized intersection + area
+    isect = shapely.intersection(
+        tiles.geometry.values[tile_idxs],
+        ls_clean.geometry.values[ls_idxs],
+    )
+    areas = shapely.area(isect)
+
+    # Build pairs DataFrame, filter empties, area-weighted majority vote
+    pairs = pd.DataFrame({
+        "tile_id": all_tile_ids[tile_idxs],
+        "susc": ls_clean["_susc_norm"].values[ls_idxs],
+        "area": areas,
+    })
+    pairs = pairs[pairs["area"] > 0]
+
+    agg = pairs.groupby(["tile_id", "susc"])["area"].sum().reset_index()
+    dominant = agg.loc[agg.groupby("tile_id")["area"].idxmax()].set_index("tile_id")["susc"]
+
+    # Build result for all tiles (default to 'none' for tiles with no landslide data)
+    result = pd.DataFrame({"tile_id": all_tile_ids})
+    result["landslide_susceptibility"] = result["tile_id"].map(dominant).fillna(DEFAULT_CLASS)
+    result["landslide_risk"] = result["landslide_susceptibility"].map(SCORE_MAP).fillna(SCORE_MAP[DEFAULT_CLASS])
+
+    return result
 
 
 def compose_environment_scores(

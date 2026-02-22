@@ -68,6 +68,15 @@
       </div>
     </section>
 
+    <!-- Grid Access (moved from Energy, P2-22) -->
+    <section class="section">
+      <h3 class="section__title">Grid Access <a href="https://www.openstreetmap.org" target="_blank" rel="noopener" class="source-link">source ↗</a></h3>
+      <div class="kv-row">
+        <span class="kv-row__label">Grid proximity score</span>
+        <span class="kv-row__value">{{ data.grid_proximity?.toFixed(0) ?? '—' }}/100</span>
+      </div>
+    </section>
+
     <section class="section">
       <h3 class="section__title">Rail Freight</h3>
       <div class="kv-row" v-if="data.nearest_rail_freight_km !== null">

@@ -258,8 +258,9 @@ def compute_energy_scores(
     """
     Compute composite energy score from sub-metrics.
 
-    Score = 0.35 * wind_norm + 0.30 * solar_norm + 0.35 * grid_proximity
-    where wind_norm and solar_norm are min-max normalised (0–100).
+    Initial score = 0.30 * wind_norm + 0.25 * solar_norm + 0.25 * grid_proximity + 0.20 * 50 (placeholder)
+    The renewable_score component (0.20 weight) is applied later by renewable.py which
+    recomputes the composite with actual renewable data.
 
     Args:
         wind_stats: Series[tile_id → wind_speed_100m m/s]
@@ -286,11 +287,12 @@ def compute_energy_scores(
     wind_norm = 100 * (wind - wind.min()) / wind_range if wind_range > 0 else pd.Series(50.0, index=wind.index)
     solar_norm = 100 * (solar - solar.min()) / solar_range if solar_range > 0 else pd.Series(50.0, index=solar.index)
 
-    # Composite score
+    # Composite score (renewable placeholder = 50 until renewable.py runs)
     score = (
-        0.35 * wind_norm
-        + 0.30 * solar_norm
-        + 0.35 * df["grid_proximity"]
+        0.30 * wind_norm
+        + 0.25 * solar_norm
+        + 0.25 * df["grid_proximity"]
+        + 0.20 * 50  # placeholder — renewable.py recomputes with real data
     )
     score = score.clip(0, 100).round(2)
 
@@ -624,6 +626,15 @@ def main():
     print(f"\n[8/8] Upserting energy pins...")
     n_pins = upsert_pins_energy(osm_power, engine)
     print(f"  Inserted {n_pins} energy pins")
+
+    # ── Step 9: Renewable energy penetration ─────────────────────────────────
+    print(f"\n[9/9] Running renewable energy pipeline...")
+    try:
+        from energy.renewable import main as renewable_main
+        renewable_main()
+    except Exception as e:
+        print(f"  WARNING: Renewable pipeline failed (non-fatal): {e}")
+        print("  You can run it separately: python energy/renewable.py")
 
     print("\n" + "=" * 60)
     print(f"Energy ingest complete: {n} tiles scored, {n_pins} pins inserted")

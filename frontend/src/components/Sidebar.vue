@@ -42,7 +42,7 @@
     </div>
 
     <!-- Score ring (shown whenever tile data is loaded) -->
-    <div class="sidebar__ring-wrap" v-if="store.selectedTileData && !store.loading">
+    <div class="sidebar__ring-wrap" v-if="store.selectedTileData && !store.loading && store.activeSort !== 'custom'">
       <svg class="sidebar__ring" viewBox="0 0 120 120" aria-hidden="true">
         <!-- Track -->
         <circle cx="60" cy="60" r="48" class="ring-track" />
@@ -102,6 +102,11 @@
         key="planning"
         :data="store.selectedTileData as TilePlanning"
       />
+      <SidebarCustom
+        v-else-if="store.activeSort === 'custom'"
+        key="custom"
+        :data="(store.selectedTileData as Record<string, any>)"
+      />
     </div>
   </aside>
 </template>
@@ -120,6 +125,7 @@ import SidebarEnvironment from '@/components/SidebarEnvironment.vue'
 import SidebarCooling from '@/components/SidebarCooling.vue'
 import SidebarConnectivity from '@/components/SidebarConnectivity.vue'
 import SidebarPlanning from '@/components/SidebarPlanning.vue'
+import SidebarCustom from '@/components/SidebarCustom.vue'
 
 const store = useSuitabilityStore()
 
@@ -130,12 +136,20 @@ onMounted(() => window.addEventListener('resize', onResize))
 onUnmounted(() => window.removeEventListener('resize', onResize))
 
 // ── Computed ───────────────────────────────────────────────────
-const tileBase = computed(() => store.selectedTileData as TileBase | null)
+const tileBase = computed((): TileBase | null => {
+  if (!store.selectedTileData) return null
+  if (store.activeSort === 'custom') {
+    // /api/tile/{id}/all returns { overall: {...}, energy: {...}, ... }
+    const data = store.selectedTileData as Record<string, any>
+    return (data.overall ?? data.energy ?? data.environment ?? data.cooling ?? data.connectivity ?? data.planning) as TileBase | null
+  }
+  return store.selectedTileData as TileBase | null
+})
 
 // ── Actions ────────────────────────────────────────────────────
 async function retry() {
   if (!store.selectedTileId) return
-  await store.fetchTileDetail(store.selectedTileId, store.activeSort)
+  await store.setSelectedTile(store.selectedTileId)
 }
 </script>
 

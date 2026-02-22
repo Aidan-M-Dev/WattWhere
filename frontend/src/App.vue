@@ -21,6 +21,7 @@
     <div class="app-main">
       <MapView class="app-map" />
       <img src="/logo.svg" alt="WattWhere" class="app-logo" />
+      <CustomBuilder class="app-custom-builder" />
       <Sidebar class="app-sidebar" />
     </div>
 
@@ -29,6 +30,9 @@
 
     <!-- Toast notifications (error/warning/info) — fixed top-right overlay -->
     <ToastContainer />
+
+    <!-- First-time visitor onboarding — handles own show/hide via localStorage -->
+    <OnboardingTooltip />
   </div>
 </template>
 
@@ -39,7 +43,9 @@ import { useToast } from '@/composables/useToast'
 import DataBar from '@/components/DataBar.vue'
 import MapView from '@/components/MapView.vue'
 import Sidebar from '@/components/Sidebar.vue'
+import CustomBuilder from '@/components/CustomBuilder.vue'
 import ToastContainer from '@/components/ToastContainer.vue'
+import OnboardingTooltip from '@/components/OnboardingTooltip.vue'
 
 const store = useSuitabilityStore()
 const { push: pushToast, remove: removeToast } = useToast()
@@ -71,6 +77,7 @@ const SORT_COLORS: Record<string, string> = {
   cooling:      '#38bdf8',
   connectivity: '#a78bfa',
   planning:     '#fb923c',
+  custom:       '#8b6af0',
 }
 
 const accentColor = computed(() => SORT_COLORS[store.activeSort] ?? '#488bff')
@@ -126,7 +133,16 @@ html, body, #app {
   pointer-events: none;
 }
 
-/* Sidebar: absolute positioned, slides in from right */
+/* Custom Builder: absolute positioned right, below sidebar z-index */
+.app-custom-builder {
+  position: absolute;
+  top: 0;
+  right: 0;
+  height: 100%;
+  z-index: 190;
+}
+
+/* Sidebar: absolute positioned, slides in from right (above custom builder) */
 .app-sidebar {
   position: absolute;
   top: 0;
