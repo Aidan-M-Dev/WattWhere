@@ -99,7 +99,7 @@ html, body, #app {
   position: absolute;
   top: 16px;
   left: 16px;
-  width: 200px;
+  width: 400px;
   height: auto;
   z-index: 150;
   pointer-events: none;
