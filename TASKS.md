@@ -58,195 +58,6 @@ after ALL five sort pipelines complete.
 
 ---
 
-### P2-01 · Energy Pipeline
-
-**Goal**: Replace synthetic `energy_scores` with real data from the Global Wind Atlas,
-Global Solar Atlas, and OSM power infrastructure. After this task, Martin serves
-real wind/solar/grid choropleth tiles.
-
-#### Dependencies
-
-Add to `pipeline/requirements.txt`:
-```
-rasterstats>=0.19.0
-pyproj>=3.6.0
-```
-All other imports (`rasterio`, `geopandas`, `numpy`, `sqlalchemy`, `psycopg2`, `tqdm`)
-are already in the skeleton's import block and must be present in requirements.txt.
-
-#### Read first
-- `pipeline/energy/ingest.py` — all 7 function skeletons; read carefully before coding
-- `pipeline/config.py` — `WIND_ATLAS_FILE`, `SOLAR_ATLAS_FILE`, `OSM_POWER_FILE`
-- `ireland-data-sources.md` §2, §3 — source formats, download URLs, licences
-- `sql/tables.sql` — `energy_scores`, `pins_energy`, `metric_ranges` schemas
-- `ARCHITECTURE.md` §5.2 — scoring weights (35% wind / 30% solar / 35% grid)
-
-#### Deliverables
-
-**1. Download source data** (into the `/data/energy/` volume):
-
-- **Wind speed**: Global Wind Atlas GeoTIFF, 100m hub height, Ireland bbox.
-  Download from globalwindatlas.info (free account required).
-  Save as `wind_speed_100m.tif`.
-- **Solar GHI**: Global Solar Atlas GeoTIFF, Ireland.
-  Download from globalsolaratlas.info (free). Save as `solar_ghi.tif`.
-- **OSM power**: Geofabrik Ireland extract filtered to `power=substation`,
-  `power=line`, `power=tower`. Use `osmium tags-filter` or the Geofabrik
-  pre-filtered extracts. Save as `osm_ireland_power.gpkg`.
-
-**Fallback** (if source files unavailable): generate synthetic GeoTIFFs using
-`numpy` random arrays with Ireland-realistic ranges and the correct spatial extent
-in EPSG:2157. This is not production quality but unblocks the pipeline for testing.
-
-**2. Implement `load_tiles(engine)`**
-
-```python
-tiles = gpd.read_postgis(
-    "SELECT tile_id, geom, centroid FROM tiles",
-    engine, geom_col="geom", crs="EPSG:4326"
-)
-return tiles.to_crs("EPSG:2157")
-```
-
-**3. Implement `extract_raster_zonal_stats(tiles, raster_path, stat='mean')`**
-
-Use `rasterstats.zonal_stats()`. The raster CRS may differ from EPSG:2157 —
-check with `rasterio.open(path).crs` and reproject tile geometries to match
-before extraction. Handle `nodata` values (set to `np.nan`).
-
-```python
-from rasterstats import zonal_stats
-# Reproject tiles to raster CRS first
-results = zonal_stats(tiles_in_raster_crs.geometry, str(raster_path),
-                      stats=[stat], nodata=nodata_val)
-return pd.Series(
-    [r[stat] for r in results],
-    index=tiles["tile_id"]
-)
-```
-
-**4. Implement `compute_grid_proximity(tiles, osm_power)`**
-
-Split OSM data into substations and lines:
-```python
-substations = osm_power[osm_power["power"] == "substation"].copy()
-lines = osm_power[osm_power["power"].isin(["line", "cable"])].copy()
-```
-
-Use `geopandas.GeoDataFrame.sjoin_nearest()` (requires geopandas ≥ 0.11) to
-find nearest substation and transmission line per tile centroid. Distances in
-metres (EPSG:2157), converted to km.
-
-Log-inverse scoring (`MAX_DIST_KM = 100` for substations):
-```python
-grid_proximity = np.clip(
-    100 * (1 - np.log1p(dist_km) / np.log1p(100)), 0, 100
-)
-```
-
-Set `grid_low_confidence = True` where `nearest_substation_km > 20`.
-Extract `nearest_substation_name` from OSM `name` tag (may be `None`).
-Extract `nearest_substation_voltage` from OSM `voltage` tag (may be `None`).
-
-**5. Implement `compute_energy_scores(wind_stats, solar_stats, grid_df)`**
-
-Min-max normalise wind and solar across all tiles:
-```python
-wind_norm = 100 * (wind - wind.min()) / (wind.max() - wind.min())
-solar_norm = 100 * (solar - solar.min()) / (solar.max() - solar.min())
-```
-
-Composite: `score = 0.35 * wind_norm + 0.30 * solar_norm + 0.35 * grid_proximity`.
-Round to 2 decimal places, clamp to `[0, 100]`.
-
-Derived wind columns:
-- `wind_speed_50m = wind_speed_100m * 0.85`
-- `wind_speed_150m = wind_speed_100m * 1.10`
-
-**6. Implement `upsert_energy_scores(df, engine)`**
-
-Use `psycopg2` `execute_values` with 500-row batches:
-```sql
-INSERT INTO energy_scores (tile_id, score, wind_speed_100m, wind_speed_50m,
-  wind_speed_150m, solar_ghi, grid_proximity, nearest_transmission_line_km,
-  nearest_substation_km, nearest_substation_name, nearest_substation_voltage,
-  grid_low_confidence)
-VALUES %s
-ON CONFLICT (tile_id) DO UPDATE SET
-  score = EXCLUDED.score,
-  wind_speed_100m = EXCLUDED.wind_speed_100m, ...
-```
-
-**7. Implement `upsert_pins_energy(osm_power, engine)`**
-
-Three pin types:
-- `wind_farm`: OSM features with `generator:source=wind`. Use centroid if polygon.
-- `transmission_node`: `power=substation` with `voltage >= 110000` (110 kV).
-- `substation`: all other `power=substation` features.
-
-Assign `tile_id` via `ST_Within` PostGIS query per pin. `tile_id` may be `NULL`
-for coastal pins. Upsert with `ON CONFLICT (pin_id) DO UPDATE`.
-
-**8. Implement `write_metric_ranges(wind_stats, solar_stats, engine)`**
-
-```python
-ranges = [
-    ("energy", "wind_speed_100m", float(wind_stats.min()), float(wind_stats.max()), "m/s"),
-    ("energy", "solar_ghi",       float(solar_stats.min()), float(solar_stats.max()), "kWh/m²/yr"),
-]
-# INSERT INTO metric_ranges ... ON CONFLICT (sort, metric) DO UPDATE SET min_val, max_val
-```
-
-**9. Implement `main()`**
-
-Uncomment the orchestration block in the existing skeleton. Remove the
-`raise NotImplementedError`. Add `print()` progress lines between each step.
-
-#### Tests / acceptance criteria
-
-```bash
-docker compose --profile pipeline run --rm pipeline python energy/ingest.py
-
-# Row count matches tiles
-docker compose exec db psql -U hackeurope -d hackeurope -c "
-  SELECT (SELECT COUNT(*) FROM energy_scores) AS energy,
-         (SELECT COUNT(*) FROM tiles)         AS tiles;"
-# Expect: equal counts
-
-# Realistic data ranges
-docker compose exec db psql -U hackeurope -d hackeurope -c "
-  SELECT MIN(wind_speed_100m), MAX(wind_speed_100m), AVG(wind_speed_100m)
-  FROM energy_scores;"
-# Expect: roughly 4–12 m/s range across Ireland
-
-# Metric ranges written
-docker compose exec db psql -U hackeurope -d hackeurope -c "
-  SELECT * FROM metric_ranges WHERE sort = 'energy';"
-# Expect: 2 rows (wind_speed_100m, solar_ghi)
-
-# Low-confidence tiles exist
-docker compose exec db psql -U hackeurope -d hackeurope -c "
-  SELECT COUNT(*) FROM energy_scores WHERE grid_low_confidence = true;"
-# Expect: > 0
-
-# Restart Martin, then verify non-empty tiles
-docker compose restart martin
-curl -s "http://localhost:3000/tile_heatmap/6/31/21?sort=energy&metric=wind_speed_100m" \
-  | wc -c
-# Expect: > 100 bytes
-```
-
-#### Common issues to pre-empt
-- Raster CRS mismatch produces all-NaN results silently. Always check
-  `rasterio.open(path).crs` before extraction.
-- OSM GeoPackage may have separate layers (`lines`, `points`, `multipolygons`).
-  Use `gpd.read_file(path, layer='lines')` for transmission lines,
-  `gpd.read_file(path, layer='points')` for substation nodes.
-- `sjoin_nearest` on large datasets is slow — consider `STRtree` if runtime > 5 min.
-- **After running, restart Martin**: `docker compose restart martin`.
-
----
-
 ### P2-02 · Environment Pipeline
 
 **Goal**: Replace synthetic `environment_scores` with real environmental constraint data
@@ -364,6 +175,16 @@ Compute polygon centroids for each designation type:
 Assign `tile_id` via `ST_Within` query. `tile_id` may be `NULL` for coastal designations.
 
 **10. Implement `main()`** — orchestrate all steps in sequence.
+
+**11. Verify source links in `SidebarEnvironment.vue`**
+
+Each section title already has a `source ↗` link (added alongside P2-01). Confirm the
+URLs match the actual data providers used:
+- Protected Area Designations → `https://npws.ie/maps-and-data/designated-site-data/download-boundary-data`
+- Flood Risk → `https://www.floodinfo.ie`
+- Landslide Susceptibility → `https://www.gsi.ie/en-ie/data-and-maps/Pages/default.aspx`
+
+Update any URL if a different source was used.
 
 #### Tests / acceptance criteria
 
@@ -508,6 +329,17 @@ Pins:
 
 **9. Implement `main()`** — orchestrate all steps. Remove `raise NotImplementedError`.
 
+**10. Verify source links in `SidebarCooling.vue`**
+
+Each section title already has a `source ↗` link (added alongside P2-01). Confirm the
+URLs match the actual data providers used:
+- Climate → `https://met.ie/climate/available-data`
+- Water Resources → `https://gis.epa.ie/GetData/Download`
+- Hydrometric Station → `https://waterlevel.ie`
+- Groundwater → `https://www.gsi.ie/en-ie/data-and-maps/Pages/default.aspx`
+
+Update any URL if a different source was used.
+
 #### Tests / acceptance criteria
 
 ```bash
@@ -641,6 +473,16 @@ Three pin types:
   by area. Skip if ComReg has no UFBB polygons.
 
 **8. Implement `main()`** — orchestrate all steps.
+
+**9. Verify source links in `SidebarConnectivity.vue`**
+
+Each section title already has a `source ↗` link (added alongside P2-01). Confirm the
+URLs match the actual data providers used:
+- Internet Exchanges → `https://www.peeringdb.com/ix/48`
+- Broadband → `https://datamaps-comreg.hub.arcgis.com`
+- Road Access → `https://www.openstreetmap.org`
+
+Update any URL if a different source was used.
 
 #### Tests / acceptance criteria
 
@@ -827,6 +669,16 @@ type pins, return an empty `pd.Series` with all `NaN` (acceptable until P2-18).
 **16. Implement `main()`** for overall composite. After completion, remind the user
 to restart Martin: `docker compose restart martin`.
 
+**17. Verify source links in `SidebarPlanning.vue`**
+
+Each section title already has a `source ↗` link (added alongside P2-01). Confirm the
+URLs match the actual data providers used:
+- Zoning Breakdown → `https://myplan.ie`
+- Planning Applications → `https://data.gov.ie`
+- Context (IDA sites) → `https://www.idaireland.com/locate-in-ireland/available-properties`
+
+Update any URL if a different source was used.
+
 #### Tests / acceptance criteria
 
 ```bash
@@ -862,118 +714,6 @@ docker compose exec db psql -U hackeurope -d hackeurope -c "
 
 docker compose restart martin
 ```
-
----
-
-### P2-06 · Grid with Real Boundary + County Assignment
-
-**Goal**: Replace the Option B hard-coded Ireland polygon in `generate_grid.py` with
-a proper OSi national boundary file. Replace Voronoi county assignment with a
-PostGIS spatial join against OSi county boundaries, giving accurate county labels
-on coastal and border tiles.
-
-**Dependency**: Running this task regenerates the `tiles` table (CASCADE truncation),
-invalidating all sort scores. Schedule it before pipeline tasks P2-01 through P2-05,
-or accept a full pipeline re-run afterwards.
-
-#### Dependencies
-
-No new packages. `geopandas`, `shapely`, `sqlalchemy`, `psycopg2` already required.
-
-#### Read first
-- `pipeline/grid/generate_grid.py` — `load_ireland_boundary()`, `assign_counties()`
-- `pipeline/config.py` — `IRELAND_BOUNDARY_FILE` path
-- `ireland-data-sources.md` §1 — OSi national boundary and county boundary sources
-
-#### Deliverables
-
-**1. Download OSi national boundary** (into `/data/grid/`):
-
-Download the OSi Ireland national boundary from the OSi Open Data Portal
-(free, CC BY 4.0). Search for "National Boundary" on data-osi.opendata.arcgis.com.
-Save as `ireland_boundary.gpkg`. This satisfies `IRELAND_BOUNDARY_FILE` in config.
-
-`load_ireland_boundary()` already handles Option A (reads from this file) — no code
-changes needed once the file is present.
-
-**2. Download OSi county boundaries**
-
-From the same OSi Open Data Portal, download the county boundaries layer.
-Save as `/data/grid/ireland_counties.gpkg`.
-
-Add to `pipeline/config.py`:
-```python
-IRELAND_COUNTIES_FILE = DATA_ROOT / "grid" / "ireland_counties.gpkg"
-```
-
-**3. Update `assign_counties()` in `generate_grid.py`**
-
-Replace the Voronoi nearest-centroid approach with a real spatial join when the
-county file is present:
-```python
-from config import IRELAND_COUNTIES_FILE  # add this import
-
-def assign_counties(grid_gdf: gpd.GeoDataFrame, engine) -> gpd.GeoDataFrame:
-    if IRELAND_COUNTIES_FILE.exists():
-        counties = gpd.read_file(IRELAND_COUNTIES_FILE).to_crs(GRID_CRS_WGS84)
-        # Identify the county name column (may be COUNTY, NAME, or COUNTY_NAME)
-        name_col = [c for c in counties.columns if "county" in c.lower() or c == "NAME"][0]
-        joined = gpd.sjoin(
-            grid_gdf.set_geometry("centroid"),
-            counties[["geometry", name_col]],
-            how="left", predicate="within"
-        )
-        grid_gdf = grid_gdf.copy()
-        grid_gdf["county"] = joined[name_col].fillna("Unknown").values
-        return grid_gdf
-    # Fall back to existing Voronoi approach
-    ...existing code...
-```
-
-**4. Populate the `counties` table**
-
-After grid generation, upsert county records from the OSi boundary file:
-```python
-with engine.begin() as conn:
-    for _, row in counties.iterrows():
-        conn.execute(text("""
-            INSERT INTO counties (name, geom)
-            VALUES (:name, ST_GeomFromText(:wkt, 4326))
-            ON CONFLICT (name) DO UPDATE SET geom = EXCLUDED.geom
-        """), {"name": row[name_col], "wkt": row.geometry.wkt})
-```
-Add this step to `main()` in `generate_grid.py` after `load_tiles_to_db()`.
-
-**5. Re-run the grid and all pipelines**
-
-```bash
-docker compose --profile pipeline run --rm pipeline python grid/generate_grid.py
-# Then re-run P2-01 through P2-05 and overall/compute_composite.py
-```
-
-#### Tests / acceptance criteria
-
-```bash
-docker compose exec db psql -U hackeurope -d hackeurope -c "
-  SELECT county, COUNT(*) FROM tiles GROUP BY county ORDER BY county;"
-# Expect: all 26 counties, no or very few 'Unknown' rows
-
-# Spot-check spatial correctness
-docker compose exec db psql -U hackeurope -d hackeurope -c "
-  SELECT county, COUNT(*) FROM tiles
-  WHERE county IN ('Cork', 'Kerry', 'Dublin', 'Galway')
-  GROUP BY county ORDER BY county;"
-# Expect: Dublin < 100 tiles; Cork > 300; Mayo/Galway/Kerry large due to area
-
-# Counties table populated
-docker compose exec db psql -U hackeurope -d hackeurope -c "
-  SELECT COUNT(*) FROM counties;"
-# Expect: 26
-```
-
----
-
-## API
 
 ---
 
