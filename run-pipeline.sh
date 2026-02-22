@@ -51,7 +51,7 @@ case "$FROM" in
 esac
 
 SORTS=(energy environment cooling connectivity planning)
-SORTS_WITH_DOWNLOAD=(energy environment cooling connectivity)
+SORTS_WITH_DOWNLOAD=(energy environment cooling connectivity planning)
 
 elapsed() { echo "  (${SECONDS}s elapsed)"; }
 
