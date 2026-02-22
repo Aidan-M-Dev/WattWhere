@@ -580,11 +580,14 @@ def compute_land_pricing(
 
         print(f"  Settlement lookup: {len(settlement_lookup)} entries")
 
+        # Pre-build substring index once (avoids O(n*m) per-row scanning)
+        substring_idx = _build_substring_index(settlement_lookup)
+
         # Match PPR addresses to settlements
         matched_points = []
         for _, row in ppr.iterrows():
             addr = str(row[addr_col]) if addr_col else ""
-            pt = _geocode_address(addr, settlement_lookup)
+            pt = _geocode_address(addr, settlement_lookup, substring_idx)
             matched_points.append(pt)
 
         ppr["_geom"] = matched_points
@@ -648,10 +651,23 @@ def compute_land_pricing(
     return result
 
 
-def _geocode_address(address: str, settlement_lookup: dict) -> object | None:
+def _build_substring_index(settlement_lookup: dict) -> dict[str, object]:
+    """
+    Build a reverse index mapping every 4+ char settlement name to its geometry.
+    Used for fast substring matching without O(n*m) nested loops.
+    Longer names are checked first (most specific match wins).
+    """
+    # Sort by length descending so longer/more-specific names take priority
+    sorted_names = sorted(settlement_lookup.keys(), key=len, reverse=True)
+    return {name: settlement_lookup[name] for name in sorted_names if len(name) >= 4}
+
+
+def _geocode_address(address: str, settlement_lookup: dict,
+                     substring_index: dict | None = None) -> object | None:
     """
     Match an address string to an OSM settlement point.
     Extracts town/city/village names from the address and looks up in the settlement dict.
+    Uses pre-built substring_index for fast substring matching.
     Returns ITM point geometry or None.
     """
     if not address or address == "nan":
@@ -671,12 +687,11 @@ def _geocode_address(address: str, settlement_lookup: dict) -> object | None:
         if cleaned in settlement_lookup:
             return settlement_lookup[cleaned]
 
-    # Try substrings — sometimes the town is embedded in a longer part
-    for part in reversed(parts):
-        if part.startswith("co.") or part.startswith("county"):
-            continue
-        for sname, sgeom in settlement_lookup.items():
-            if len(sname) >= 4 and sname in part:
+    # Try substrings via pre-built index (avoids O(n*m) inner loop)
+    if substring_index is not None:
+        addr_lower = address.lower()
+        for sname, sgeom in substring_index.items():
+            if sname in addr_lower:
                 return sgeom
 
     return None
@@ -849,7 +864,7 @@ def upsert_planning_scores(df: pd.DataFrame, engine: sqlalchemy.Engine) -> int:
     pg_conn = engine.raw_connection()
     try:
         cur = pg_conn.cursor()
-        batch_size = 500
+        batch_size = 2000
         for i in tqdm(range(0, len(rows), batch_size), desc="Upserting planning_scores"):
             execute_values(cur, sql, rows[i: i + batch_size])
         pg_conn.commit()
@@ -888,7 +903,7 @@ def upsert_planning_applications(planning_df: pd.DataFrame, engine: sqlalchemy.E
     total_inserted = 0
     try:
         cur = pg_conn.cursor()
-        batch_size = 500
+        batch_size = 2000
 
         for i in tqdm(
             range(0, len(affected_tile_ids), batch_size),
@@ -972,44 +987,52 @@ def upsert_pins_planning(
         # then take representative points, limited to ~500 pins
         ie_wgs = ie_parcels.to_crs("EPSG:4326")
 
-        # Simple clustering: skip parcels whose centroids are within 2km of already-added ones
+        # Cluster parcels within 2km using STRtree (avoids O(n^2) distance loop)
+        from shapely.strtree import STRtree as _STRtree
         ie_itm = ie_parcels.copy()
-        added_points = []
         cluster_dist = 2000  # 2 km minimum spacing
 
+        # Pre-compute all centroids
+        parcel_centroids = []
         for _, row in ie_itm.iterrows():
             geom = row.geometry
             if geom.geom_type in ("Polygon", "MultiPolygon"):
-                centroid = geom.representative_point()
+                parcel_centroids.append(geom.representative_point())
             else:
-                centroid = geom.centroid
+                parcel_centroids.append(geom.centroid)
 
-            too_close = False
-            for ap in added_points:
-                if centroid.distance(ap) < cluster_dist:
-                    too_close = True
+        if len(parcel_centroids) > 0:
+            tree = _STRtree(parcel_centroids)
+            consumed = np.zeros(len(parcel_centroids), dtype=bool)
+            selected_indices = []
+
+            for idx in range(len(parcel_centroids)):
+                if consumed[idx]:
+                    continue
+                neighbours = tree.query(parcel_centroids[idx].buffer(cluster_dist))
+                consumed[neighbours] = True
+                selected_indices.append(idx)
+                if len(selected_indices) >= 500:
                     break
-            if too_close:
-                continue
-            added_points.append(centroid)
 
-            # Convert centroid to WGS84
-            centroid_wgs = gpd.GeoSeries([centroid], crs=GRID_CRS_ITM).to_crs("EPSG:4326").iloc[0]
-
-            cat_val = str(row[cat_col]) if cat_col else "Industrial/Enterprise"
-            pin_rows.append({
-                "lng": float(centroid_wgs.x),
-                "lat": float(centroid_wgs.y),
-                "name": f"{cat_val} Zoned Parcel",
-                "type": "zoning_parcel",
-                "app_ref": None,
-                "app_status": None,
-                "app_date": None,
-                "app_type": None,
-            })
-
-            if len(pin_rows) >= 500:
-                break
+            # Batch convert selected centroids to WGS84
+            selected_pts = [parcel_centroids[i] for i in selected_indices]
+            if selected_pts:
+                wgs_pts = gpd.GeoSeries(selected_pts, crs=GRID_CRS_ITM).to_crs("EPSG:4326")
+                for j, idx in enumerate(selected_indices):
+                    row = ie_itm.iloc[idx]
+                    centroid_wgs = wgs_pts.iloc[j]
+                    cat_val = str(row[cat_col]) if cat_col else "Industrial/Enterprise"
+                    pin_rows.append({
+                        "lng": float(centroid_wgs.x),
+                        "lat": float(centroid_wgs.y),
+                        "name": f"{cat_val} Zoned Parcel",
+                        "type": "zoning_parcel",
+                        "app_ref": None,
+                        "app_status": None,
+                        "app_date": None,
+                        "app_type": None,
+                    })
 
         print(f"  Zoning parcel pins: {len(ie_parcels)} parcels → {len(pin_rows)} after clustering")
     else:

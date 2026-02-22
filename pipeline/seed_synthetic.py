@@ -491,6 +491,7 @@ def seed_metric_ranges(conn) -> None:
         ("cooling",  "temperature",           8.5,    13.5,    "\u00b0C"),
         ("cooling",  "rainfall",              700.0,  2500.0,  "mm/yr"),
         ("planning", "avg_price_per_sqm_eur", 1000.0, 11000.0, "\u20ac/m\u00b2"),
+        ("overall",  "population_density",    0.0,    5000.0,  "/km\u00b2"),
     ]
 
     with conn.cursor() as cur:

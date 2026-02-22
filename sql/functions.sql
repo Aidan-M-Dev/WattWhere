@@ -43,6 +43,8 @@ BEGIN
                 WHEN v_sort = 'overall' AND v_metric = 'cooling_score'      THEN o.cooling_score
                 WHEN v_sort = 'overall' AND v_metric = 'connectivity_score' THEN o.connectivity_score
                 WHEN v_sort = 'overall' AND v_metric = 'planning_score'     THEN o.planning_score
+                WHEN v_sort = 'overall' AND v_metric = 'population_density' THEN
+                    (p.population_density_per_km2 - mr.min_val) / NULLIF(mr.max_val - mr.min_val, 0) * 100
                 -- ── ENERGY ──────────────────────────────────────────────
                 WHEN v_sort = 'energy' AND v_metric = 'score'              THEN e.score
                 -- grid_proximity moved to connectivity (P2-22)

@@ -102,15 +102,17 @@ def load_tiles(engine: sqlalchemy.Engine) -> gpd.GeoDataFrame:
 
 def _prep_vector(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     """
-    Reproject to EPSG:2157, explode MultiPolygons, fix invalid geometries.
-    Returns a clean GeoDataFrame ready for intersection operations.
+    Reproject to EPSG:2157, make_valid, simplify to 250 m tolerance.
+    Skips explode — STRtree handles MultiPolygons natively.
+    250 m tolerance is plenty for ~2.2 km tile sides.
     """
     if gdf.crs is None:
         gdf = gdf.set_crs("EPSG:4326")
     gdf = gdf.to_crs(GRID_CRS_ITM)
-    gdf = gdf.explode(index_parts=False).reset_index(drop=True)
-    gdf["geometry"] = gdf.geometry.buffer(0)  # fix invalid geometries
-    gdf = gdf[gdf.geometry.is_valid & ~gdf.geometry.is_empty].reset_index(drop=True)
+    gdf["geometry"] = shapely.make_valid(gdf.geometry.values)
+    gdf["geometry"] = shapely.simplify(gdf.geometry.values, tolerance=250.0)
+    gdf["geometry"] = shapely.make_valid(gdf.geometry.values)  # re-fix after simplify
+    gdf = gdf[~gdf.geometry.is_empty].reset_index(drop=True)
     return gdf
 
 
@@ -297,15 +299,16 @@ def compute_designation_overlaps(
 
 def _prep_flood_vector(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     """
-    Fast-path prep for flood data: reproject, make_valid (skip buffer(0)),
-    simplify to 50 m tolerance (plenty for 5 km grid), drop empties.
+    Fast-path prep for flood data: reproject, make_valid,
+    simplify to 250 m tolerance (matches 5 km grid precision), drop empties.
     Skips explode — STRtree handles MultiPolygons natively.
     """
     if gdf.crs is None:
         gdf = gdf.set_crs("EPSG:4326")
     gdf = gdf.to_crs(GRID_CRS_ITM)
     gdf["geometry"] = shapely.make_valid(gdf.geometry.values)
-    gdf["geometry"] = shapely.simplify(gdf.geometry.values, tolerance=50.0)
+    gdf["geometry"] = shapely.simplify(gdf.geometry.values, tolerance=250.0)
+    gdf["geometry"] = shapely.make_valid(gdf.geometry.values)  # re-fix after simplify
     gdf = gdf[~gdf.geometry.is_empty].reset_index(drop=True)
     return gdf
 
@@ -367,29 +370,25 @@ def compute_landslide_risk(
     landslide: gpd.GeoDataFrame,
 ) -> pd.DataFrame:
     """
-    For each tile, extract landslide susceptibility (none/low/medium/high)
-    via spatial majority join.
+    For each tile, determine worst-case landslide susceptibility class
+    via boolean intersection (no area weighting — 5 km² tiles don't need it).
     Derive landslide_risk score: none=100, low=70, medium=40, high=10.
-
-    GSI field name varies — checked dynamically and normalised to lowercase.
     """
     SCORE_MAP = {"none": 100.0, "low": 70.0, "medium": 40.0, "high": 10.0}
+    CLASS_RANK = {"high": 3, "medium": 2, "low": 1, "none": 0}
     DEFAULT_CLASS = "none"
 
     tiles = tiles.to_crs(GRID_CRS_ITM) if tiles.crs.to_epsg() != 2157 else tiles
-    ls_clean = _prep_vector(landslide)
 
-    # GSI field name varies — check for known candidates
+    # GSI field name varies — check for known candidates (before reprojecting)
     susc_col = _find_col(
-        ls_clean,
-        # GSI field confirmed as LSSUSCLASS (IE_GSI_Landslide_Susceptibility_Classification_50K)
+        landslide,
         ["LSSUSCLASS", "LSSUSDESC", "SUSCEPTIBI", "Susceptibility", "SUSC_CLASS",
          "SUSC_RATIN", "CLASS", "Susc_Class", "landslide_susceptibility", "HAZARD", "Hazard"],
     )
     if susc_col is None:
         print("  Warning: could not find susceptibility column in landslide GDF")
-        print(f"  Available columns: {list(ls_clean.columns)}")
-        # Fall back to 'none' for all tiles
+        print(f"  Available columns: {list(landslide.columns)}")
         return pd.DataFrame({
             "tile_id": tiles["tile_id"].values,
             "landslide_susceptibility": DEFAULT_CLASS,
@@ -398,71 +397,52 @@ def compute_landslide_risk(
 
     print(f"  Using susceptibility column: '{susc_col}'")
 
-    # Normalise susceptibility values to lowercase
-    ls_clean["_susc_norm"] = (
-        ls_clean[susc_col]
-        .astype(str)
-        .str.lower()
-        .str.strip()
-        .fillna(DEFAULT_CLASS)
-    )
-
-    # Map to canonical classes
+    # Normalise to canonical classes BEFORE heavy geometry work
     def _canonical(val: str) -> str:
-        # GSI LSSUSCLASS uses numeric codes: 1=Low, 2=Medium, 3=High
-        if val in ("3", "high"):
+        v = str(val).lower().strip()
+        if v in ("3", "high") or "high" in v:
             return "high"
-        if val in ("2", "medium", "moderate"):
+        if v in ("2", "medium", "moderate") or "medium" in v or "moderate" in v:
             return "medium"
-        if val in ("1", "low"):
-            return "low"
-        if "high" in val:
-            return "high"
-        if "medium" in val or "moderate" in val:
-            return "medium"
-        if "low" in val:
+        if v in ("1", "low") or "low" in v:
             return "low"
         return "none"
 
-    ls_clean["_susc_norm"] = ls_clean["_susc_norm"].apply(_canonical)
+    landslide["_susc"] = landslide[susc_col].apply(_canonical)
+    landslide["_rank"] = landslide["_susc"].map(CLASS_RANK)
 
-    # Bulk STRtree query + vectorized intersection for area-weighted majority vote
-    tree = STRtree(ls_clean.geometry.values)
-    tile_idxs, ls_idxs = tree.query(tiles.geometry.values, predicate="intersects")
+    # Drop "none" class early — no need to process them
+    landslide = landslide[landslide["_rank"] > 0].copy()
+    print(f"  After dropping 'none' class: {len(landslide)} polygons")
 
+    # Dissolve per class, then reproject + simplify — collapses millions of rows to 3
+    print("  Dissolving per susceptibility class...")
+    dissolved = landslide[["_rank", "geometry"]].dissolve(by="_rank").reset_index()
+    print(f"  Dissolved to {len(dissolved)} class geometries")
+
+    ls_clean = _prep_flood_vector(dissolved)
+    ls_clean["_rank"] = dissolved["_rank"].values[:len(ls_clean)]
+
+    # Split by class and boolean-intersect each (worst wins)
     all_tile_ids = tiles["tile_id"].values.astype(int)
+    worst_rank = np.zeros(len(all_tile_ids), dtype=int)  # 0 = none
 
-    if len(tile_idxs) == 0:
-        return pd.DataFrame({
-            "tile_id": all_tile_ids,
-            "landslide_susceptibility": DEFAULT_CLASS,
-            "landslide_risk": SCORE_MAP[DEFAULT_CLASS],
-        })
+    for cls, rank in [("high", 3), ("medium", 2), ("low", 1)]:
+        subset = ls_clean[ls_clean["_rank"] == rank]
+        if len(subset) == 0:
+            continue
+        tree = STRtree(subset.geometry.values)
+        hit_idxs, _ = tree.query(tiles.geometry.values, predicate="intersects")
+        worst_rank[hit_idxs] = np.maximum(worst_rank[hit_idxs], rank)
 
-    # Vectorized intersection + area
-    isect = shapely.intersection(
-        tiles.geometry.values[tile_idxs],
-        ls_clean.geometry.values[ls_idxs],
-    )
-    areas = shapely.area(isect)
+    rank_to_class = {0: "none", 1: "low", 2: "medium", 3: "high"}
+    classes = np.array([rank_to_class[r] for r in worst_rank])
 
-    # Build pairs DataFrame, filter empties, area-weighted majority vote
-    pairs = pd.DataFrame({
-        "tile_id": all_tile_ids[tile_idxs],
-        "susc": ls_clean["_susc_norm"].values[ls_idxs],
-        "area": areas,
+    return pd.DataFrame({
+        "tile_id": all_tile_ids,
+        "landslide_susceptibility": classes,
+        "landslide_risk": np.array([SCORE_MAP[c] for c in classes]),
     })
-    pairs = pairs[pairs["area"] > 0]
-
-    agg = pairs.groupby(["tile_id", "susc"])["area"].sum().reset_index()
-    dominant = agg.loc[agg.groupby("tile_id")["area"].idxmax()].set_index("tile_id")["susc"]
-
-    # Build result for all tiles (default to 'none' for tiles with no landslide data)
-    result = pd.DataFrame({"tile_id": all_tile_ids})
-    result["landslide_susceptibility"] = result["tile_id"].map(dominant).fillna(DEFAULT_CLASS)
-    result["landslide_risk"] = result["landslide_susceptibility"].map(SCORE_MAP).fillna(SCORE_MAP[DEFAULT_CLASS])
-
-    return result
 
 
 def compose_environment_scores(
@@ -586,7 +566,7 @@ def upsert_environment_scores(df: pd.DataFrame, engine: sqlalchemy.Engine) -> in
     pg_conn = engine.raw_connection()
     try:
         cur = pg_conn.cursor()
-        batch_size = 500
+        batch_size = 2000
         for i in tqdm(range(0, len(rows), batch_size), desc="Upserting environment_scores"):
             execute_values(cur, sql, rows[i: i + batch_size])
         pg_conn.commit()
@@ -627,7 +607,7 @@ def upsert_designation_overlaps(designation_df: pd.DataFrame, engine: sqlalchemy
     total_inserted = 0
     try:
         cur = pg_conn.cursor()
-        batch_size = 500
+        batch_size = 2000
 
         for i in tqdm(
             range(0, len(affected_tile_ids), batch_size),

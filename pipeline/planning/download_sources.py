@@ -13,23 +13,34 @@ Sources:
     Boundaries: data-osi.opendata.arcgis.com — Small Areas 2022
     Stats: cso.ie — Census 2022 SAPS
 
+  Property Price Register (PPR): propertypriceregister.ie
+    https://www.propertypriceregister.ie  (public, ZIP→CSV)
+
+  OSM settlement/place nodes: OpenStreetMap via Overpass API
+    https://overpass-api.de  (ODbL)
+
 Run: python planning/download_sources.py
      (saves to /data/planning/ — re-run is idempotent, skips existing files)
 """
 
 import sys
+import io
 import json
 import urllib.request
 import urllib.parse
+import zipfile
 from pathlib import Path
 
 import geopandas as gpd
 import numpy as np
 import pandas as pd
-from shapely.geometry import Polygon, Point, box
+from shapely.geometry import Polygon, Point, box, shape
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from config import MYPLAN_ZONING_FILE, PLANNING_APPLICATIONS_FILE, CSO_POPULATION_FILE
+from config import (
+    MYPLAN_ZONING_FILE, PLANNING_APPLICATIONS_FILE, CSO_POPULATION_FILE,
+    PPR_FILE, OSM_SETTLEMENTS_FILE,
+)
 
 # Ireland bounding box WGS84
 IRE_LON_MIN, IRE_LON_MAX = -11.0, -5.5
@@ -477,6 +488,265 @@ def download_cso_population():
     print(f"  Saved to {CSO_POPULATION_FILE}")
 
 
+# ── Property Price Register — propertypriceregister.ie ────────────────────────
+
+_PPR_ZIP_URL = (
+    "https://www.propertypriceregister.ie/website/npsra/ppr/"
+    "npsra-ppr.nsf/Downloads/PPR-ALL.zip/$FILE/PPR-ALL.zip"
+)
+
+
+def _generate_synthetic_ppr() -> pd.DataFrame:
+    """
+    Generate synthetic PPR-like transaction data when download is unavailable.
+    Models price distribution across Ireland with urban/rural gradient.
+    """
+    rng = np.random.RandomState(789)
+    print("  Generating synthetic PPR transaction data...")
+
+    urban_centres = [
+        ("Dublin", -6.26, 53.35, 40, 5500),
+        ("Cork", -8.48, 51.90, 20, 3200),
+        ("Galway", -9.06, 53.27, 12, 2800),
+        ("Limerick", -8.62, 52.67, 12, 2400),
+        ("Waterford", -7.11, 52.26, 8, 2200),
+        ("Drogheda", -6.35, 53.72, 6, 3000),
+        ("Dundalk", -6.40, 54.00, 5, 2600),
+        ("Kilkenny", -7.25, 52.65, 4, 2400),
+        ("Athlone", -7.94, 53.42, 4, 2000),
+        ("Tralee", -9.70, 52.27, 3, 1800),
+        ("Sligo", -8.48, 54.28, 3, 1800),
+        ("Letterkenny", -7.73, 54.95, 3, 1600),
+        ("Ennis", -8.98, 52.84, 3, 2000),
+    ]
+
+    counties = [
+        "Dublin", "Cork", "Galway", "Limerick", "Waterford", "Meath",
+        "Kildare", "Wicklow", "Kerry", "Clare", "Mayo", "Donegal",
+        "Tipperary", "Kilkenny", "Wexford", "Louth", "Westmeath",
+        "Offaly", "Laois", "Sligo", "Roscommon", "Leitrim", "Longford",
+        "Cavan", "Monaghan", "Carlow",
+    ]
+
+    size_descs = [
+        "less than 38 sq metres",
+        "38 sq metres to less than 57 sq metres",
+        "57 sq metres to less than 75 sq metres",
+        "75 sq metres to less than 100 sq metres",
+        "100 sq metres to less than 125 sq metres",
+        "125 sq metres to less than 150 sq metres",
+        "greater than 150 sq metres",
+    ]
+    size_weights = [0.03, 0.08, 0.15, 0.25, 0.22, 0.15, 0.12]
+
+    rows = []
+    n_transactions = 8000
+
+    for i in range(n_transactions):
+        # Pick a location weighted toward urban centres
+        if rng.random() < 0.6:
+            # Near an urban centre
+            idx = rng.choice(len(urban_centres), p=np.array(
+                [c[3] for c in urban_centres]
+            ) / sum(c[3] for c in urban_centres))
+            name, cx, cy, _, peak_price = urban_centres[idx]
+            dist = rng.exponential(0.15)
+            angle = rng.uniform(0, 2 * np.pi)
+            lon = cx + (dist / 80) * np.cos(angle)
+            lat = cy + (dist / 111) * np.sin(angle)
+            base_price = peak_price * max(0.3, 1 - dist * 2)
+            county = name if name in counties else rng.choice(counties)
+        else:
+            # Rural
+            lon = rng.uniform(IRE_LON_MIN + 1.0, IRE_LON_MAX - 0.3)
+            lat = rng.uniform(IRE_LAT_MIN + 0.3, IRE_LAT_MAX - 0.3)
+            base_price = rng.uniform(800, 2000)
+            county = rng.choice(counties)
+
+        price = max(50000, int(base_price * rng.uniform(60, 140)))
+        year = rng.choice([2022, 2023, 2024, 2025], p=[0.15, 0.25, 0.35, 0.25])
+        month = rng.randint(1, 13)
+        day = rng.randint(1, 29)
+        size_desc = rng.choice(size_descs, p=size_weights)
+
+        rows.append({
+            "Date of Sale (dd/mm/yyyy)": f"{day:02d}/{month:02d}/{year}",
+            "Address": f"{rng.randint(1,200)} Main Street, {county}",
+            "County": county,
+            "Price (\u20ac)": f"\u20ac{price:,}",
+            "Not Full Market Price": "No",
+            "VAT Exclusive": "No",
+            "Description of Property": rng.choice(["New Dwelling house /Apartment",
+                                                    "Second-Hand Dwelling house /Apartment"]),
+            "Property Size Description": size_desc,
+        })
+
+    df = pd.DataFrame(rows)
+    print(f"  Generated {len(df)} synthetic transactions")
+    print(f"  County distribution (top 5): {dict(df['County'].value_counts().head())}")
+    return df
+
+
+def download_ppr():
+    if PPR_FILE.exists():
+        print(f"[ppr] Already present: {PPR_FILE}")
+        return
+
+    PPR_FILE.parent.mkdir(parents=True, exist_ok=True)
+
+    # Try downloading the official PPR ZIP
+    print(f"  Downloading PPR ZIP from propertypriceregister.ie...")
+    try:
+        raw = _download(_PPR_ZIP_URL, "PPR-ALL.zip", timeout=120)
+        with zipfile.ZipFile(io.BytesIO(raw)) as zf:
+            # Find the CSV inside the ZIP
+            csv_names = [n for n in zf.namelist() if n.lower().endswith(".csv")]
+            if not csv_names:
+                raise ValueError("No CSV found in PPR ZIP archive")
+            csv_name = csv_names[0]
+            print(f"  Extracting {csv_name}...")
+            with zf.open(csv_name) as src, open(PPR_FILE, "wb") as dst:
+                dst.write(src.read())
+        # Verify it's readable
+        df = pd.read_csv(PPR_FILE, encoding="latin-1", nrows=5)
+        print(f"  Saved PPR CSV ({PPR_FILE.stat().st_size / 1_048_576:.1f} MB, columns: {list(df.columns)})")
+        return
+    except Exception as e:
+        print(f"  PPR download failed: {e}")
+
+    # Fallback: synthetic
+    print("\n  Could not download PPR data.")
+    print("  Falling back to synthetic transaction data.")
+    df = _generate_synthetic_ppr()
+    df.to_csv(PPR_FILE, index=False, encoding="latin-1")
+    print(f"  Saved to {PPR_FILE}")
+
+
+# ── OSM settlement nodes — Overpass API ──────────────────────────────────────
+
+_OVERPASS_URL = "https://overpass-api.de/api/interpreter"
+
+# Republic of Ireland area ID (OSM relation 62273)
+_OVERPASS_SETTLEMENTS_QUERY = """
+[out:json][timeout:120];
+area(3600062273)->.irl;
+(
+  node["place"~"^(city|town|village|suburb|hamlet)$"](area.irl);
+);
+out body;
+"""
+
+
+def _overpass_settlements_to_gdf(raw: bytes) -> gpd.GeoDataFrame:
+    """Convert Overpass JSON response to a GeoDataFrame of settlement points."""
+    data = json.loads(raw)
+    elements = data.get("elements", [])
+    print(f"  OSM settlement nodes returned: {len(elements)}")
+
+    rows = []
+    for el in elements:
+        if el.get("type") != "node":
+            continue
+        tags = el.get("tags", {})
+        name = tags.get("name")
+        if not name:
+            continue
+        rows.append({
+            "name": name,
+            "place": tags.get("place", ""),
+            "name_ga": tags.get("name:ga", ""),
+            "geometry": Point(el["lon"], el["lat"]),
+        })
+
+    gdf = gpd.GeoDataFrame(rows, crs="EPSG:4326")
+    return gdf
+
+
+def _generate_synthetic_settlements() -> gpd.GeoDataFrame:
+    """Generate synthetic settlement points when Overpass is unavailable."""
+    print("  Generating synthetic settlement points...")
+
+    # Major settlements with approximate coordinates
+    settlements = [
+        ("Dublin", "city", -6.26, 53.35), ("Cork", "city", -8.48, 51.90),
+        ("Galway", "city", -9.06, 53.27), ("Limerick", "city", -8.62, 52.67),
+        ("Waterford", "city", -7.11, 52.26),
+        ("Drogheda", "town", -6.35, 53.72), ("Dundalk", "town", -6.40, 54.00),
+        ("Swords", "town", -6.22, 53.46), ("Navan", "town", -6.68, 53.65),
+        ("Kilkenny", "town", -7.25, 52.65), ("Ennis", "town", -8.98, 52.84),
+        ("Tralee", "town", -9.70, 52.27), ("Athlone", "town", -7.94, 53.42),
+        ("Sligo", "town", -8.48, 54.28), ("Letterkenny", "town", -7.73, 54.95),
+        ("Wexford", "town", -6.46, 52.34), ("Mullingar", "town", -7.34, 53.53),
+        ("Carlow", "town", -6.93, 52.84), ("Tullamore", "town", -7.49, 53.27),
+        ("Clonmel", "town", -7.70, 52.35), ("Castlebar", "town", -9.30, 53.76),
+        ("Roscommon", "town", -8.19, 53.63), ("Longford", "town", -7.79, 53.73),
+        ("Portlaoise", "town", -7.30, 53.03), ("Naas", "town", -6.66, 53.22),
+        ("Bray", "town", -6.10, 53.20), ("Greystones", "town", -6.06, 53.14),
+        ("Maynooth", "town", -6.59, 53.38), ("Celbridge", "town", -6.54, 53.34),
+        ("Leixlip", "town", -6.49, 53.36), ("Newbridge", "town", -6.80, 53.18),
+        ("Arklow", "town", -6.16, 52.80), ("Wicklow", "town", -6.04, 52.97),
+        ("Dungarvan", "town", -7.62, 52.09), ("Cobh", "town", -8.30, 51.85),
+        ("Mallow", "town", -8.63, 52.13), ("Midleton", "town", -8.17, 51.91),
+        ("Fermoy", "town", -8.28, 52.14), ("Kinsale", "town", -8.52, 51.71),
+        ("Bantry", "village", -9.45, 51.68), ("Kenmare", "village", -9.58, 51.88),
+        ("Dingle", "village", -10.27, 52.14), ("Listowel", "town", -9.49, 52.44),
+        ("Killarney", "town", -9.51, 52.06), ("Cahir", "village", -7.93, 52.38),
+        ("Thurles", "town", -7.80, 52.68), ("Nenagh", "town", -8.20, 52.86),
+        ("Roscrea", "town", -7.80, 52.95), ("Birr", "town", -7.91, 53.10),
+        ("Ballinasloe", "town", -8.23, 53.33), ("Tuam", "town", -8.85, 53.51),
+        ("Clifden", "village", -10.02, 53.49), ("Westport", "town", -9.52, 53.80),
+        ("Ballina", "town", -9.15, 54.12), ("Boyle", "town", -8.30, 53.97),
+        ("Carrick-on-Shannon", "town", -8.09, 53.95), ("Cavan", "town", -7.36, 53.99),
+        ("Monaghan", "town", -6.97, 54.25), ("Clones", "village", -7.23, 54.18),
+        ("Donegal", "town", -8.11, 54.65), ("Buncrana", "town", -7.45, 55.14),
+        ("Ballyshannon", "town", -8.18, 54.50), ("Bundoran", "village", -8.28, 54.48),
+    ]
+
+    rows = [{"name": n, "place": p, "name_ga": "", "geometry": Point(lon, lat)}
+            for n, p, lon, lat in settlements]
+    gdf = gpd.GeoDataFrame(rows, crs="EPSG:4326")
+    print(f"  Generated {len(gdf)} synthetic settlement points")
+    return gdf
+
+
+def download_osm_settlements():
+    if OSM_SETTLEMENTS_FILE.exists():
+        print(f"[osm] Already present: {OSM_SETTLEMENTS_FILE}")
+        return
+
+    OSM_SETTLEMENTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+
+    print("  Querying Overpass API for Ireland settlement nodes...")
+    try:
+        encoded = urllib.parse.urlencode({"data": _OVERPASS_SETTLEMENTS_QUERY}).encode()
+        req = urllib.request.Request(
+            _OVERPASS_URL,
+            data=encoded,
+            headers={"User-Agent": "HackEurope-pipeline/1.0"},
+        )
+        with urllib.request.urlopen(req, timeout=180) as resp:
+            raw = resp.read()
+        print(f"  Response size: {len(raw) / 1_048_576:.1f} MB")
+
+        gdf = _overpass_settlements_to_gdf(raw)
+        print(f"  Settlement features: {len(gdf)}")
+        if "place" in gdf.columns:
+            print(f"  Place types: {dict(gdf['place'].value_counts())}")
+
+        gdf.to_file(str(OSM_SETTLEMENTS_FILE), driver="GPKG")
+        print(f"  Saved to {OSM_SETTLEMENTS_FILE}")
+        return
+    except Exception as e:
+        print(f"  Overpass query failed: {e}")
+
+    # Fallback: synthetic
+    print("\n  Could not download OSM settlements from Overpass.")
+    print("  Falling back to synthetic settlement points.")
+    gdf = _generate_synthetic_settlements()
+    gdf.to_file(str(OSM_SETTLEMENTS_FILE), driver="GPKG")
+    print(f"  Saved to {OSM_SETTLEMENTS_FILE}")
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
@@ -484,14 +754,20 @@ def main():
     print("Downloading planning source data")
     print("=" * 60)
 
-    print("\n[1/3] MyPlan GZT Development Plan Zoning")
+    print("\n[1/5] MyPlan GZT Development Plan Zoning")
     download_myplan_zoning()
 
-    print("\n[2/3] National Planning Applications")
+    print("\n[2/5] National Planning Applications")
     download_planning_applications()
 
-    print("\n[3/3] CSO Small Area Population Statistics 2022")
+    print("\n[3/5] CSO Small Area Population Statistics 2022")
     download_cso_population()
+
+    print("\n[4/5] Property Price Register (PPR)")
+    download_ppr()
+
+    print("\n[5/5] OSM settlement nodes (for PPR geocoding)")
+    download_osm_settlements()
 
     print("\n" + "=" * 60)
     print("All source files ready. Run: python planning/ingest.py")

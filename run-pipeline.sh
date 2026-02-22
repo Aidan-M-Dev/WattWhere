@@ -11,6 +11,12 @@ set -euo pipefail
 #   ./run-pipeline.sh --only energy    # run only energy download + ingest
 #   ./run-pipeline.sh --only cooling --skip-download  # re-run cooling ingest only
 #   ./run-pipeline.sh --from ingest    # skip schema + grid + downloads, run all ingests
+#   ./run-pipeline.sh --serial         # force serial execution (lower resource usage)
+#
+# Parallelism:
+#   Downloads run in parallel (network-bound, no CPU contention).
+#   Ingests run 2 at a time by default (CPU-bound, capped to avoid freezing).
+#   Use --serial to disable parallelism entirely.
 
 export MSYS_NO_PATHCONV=1
 
@@ -21,6 +27,8 @@ SKIP_DOWNLOAD=false
 SKIP_SCHEMA=false
 ONLY=""
 FROM=""
+SERIAL=false
+MAX_PARALLEL_INGEST=2  # max concurrent ingest jobs (keep headroom for OS/DB)
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -28,6 +36,7 @@ while [[ $# -gt 0 ]]; do
     --skip-schema)   SKIP_SCHEMA=true; shift ;;
     --only)          ONLY="$2"; shift 2 ;;
     --from)          FROM="$2"; shift 2 ;;
+    --serial)        SERIAL=true; shift ;;
     -h|--help)
       echo "Usage: ./run-pipeline.sh [OPTIONS]"
       echo ""
@@ -36,6 +45,7 @@ while [[ $# -gt 0 ]]; do
       echo "  --skip-schema     Skip DB schema application and grid generation"
       echo "  --only SORT       Run only one sort pipeline (energy|environment|cooling|connectivity|planning)"
       echo "  --from STAGE      Start from stage: schema|grid|download|ingest|composite"
+      echo "  --serial          Force serial execution (lower resource usage)"
       echo "  -h, --help        Show this help"
       exit 0 ;;
     *) echo "Unknown option: $1"; exit 1 ;;
@@ -57,8 +67,21 @@ SORTS_WITH_DOWNLOAD=(energy environment cooling connectivity planning)
 
 elapsed() { echo "  (${SECONDS}s elapsed)"; }
 
+# ── Helper: wait for N background jobs, capping concurrent count ────────────
+wait_for_slot() {
+  local max=$1
+  while (( $(jobs -rp | wc -l) >= max )); do
+    sleep 1
+  done
+}
+
 echo "============================================================"
 echo " HackEurope Pipeline Runner"
+if [[ "$SERIAL" == true ]]; then
+  echo " Mode: serial"
+else
+  echo " Mode: parallel (downloads all-at-once, ingests ${MAX_PARALLEL_INGEST}-at-a-time)"
+fi
 echo "============================================================"
 echo ""
 SECONDS=0
@@ -110,12 +133,45 @@ if [[ "$SKIP_DOWNLOAD" == false && "$ONLY" != "__composite_only__" ]]; then
         $PIPELINE python "$ONLY/download_sources.py"
         ;;
     esac
-  else
+  elif [[ "$SERIAL" == true ]]; then
     for sort in "${SORTS_WITH_DOWNLOAD[@]}"; do
       echo ""
       echo "  ── $sort ──"
       $PIPELINE python "$sort/download_sources.py"
     done
+  else
+    # Parallel downloads (network-bound — safe to run all at once)
+    echo "  Launching all downloads in parallel..."
+    DL_PIDS=()
+    DL_LOG_DIR=$(mktemp -d)
+    for sort in "${SORTS_WITH_DOWNLOAD[@]}"; do
+      (
+        $PIPELINE python "$sort/download_sources.py" \
+          > "$DL_LOG_DIR/$sort.log" 2>&1
+      ) &
+      DL_PIDS+=($!)
+      echo "    $sort download started (PID $!)"
+    done
+
+    # Wait for all downloads
+    DL_FAILED=()
+    for i in "${!SORTS_WITH_DOWNLOAD[@]}"; do
+      sort="${SORTS_WITH_DOWNLOAD[$i]}"
+      pid="${DL_PIDS[$i]}"
+      if wait "$pid"; then
+        echo "    $sort download: OK"
+      else
+        echo "    $sort download: FAILED (see $DL_LOG_DIR/$sort.log)"
+        DL_FAILED+=("$sort")
+      fi
+    done
+
+    if [[ ${#DL_FAILED[@]} -gt 0 ]]; then
+      echo ""
+      echo "  WARNING: ${#DL_FAILED[@]} download(s) failed: ${DL_FAILED[*]}"
+      echo "  Check logs in: $DL_LOG_DIR/"
+    fi
+    rm -rf "$DL_LOG_DIR" 2>/dev/null || true
   fi
   elapsed
 else
@@ -133,7 +189,7 @@ if [[ "$ONLY" != "__composite_only__" ]]; then
     echo ""
     echo "  ── $ONLY ingest ──"
     $PIPELINE python "$ONLY/ingest.py"
-  else
+  elif [[ "$SERIAL" == true ]]; then
     for sort in "${SORTS[@]}"; do
       echo ""
       echo "  ══════════════════════════════════════════"
@@ -145,6 +201,43 @@ if [[ "$ONLY" != "__composite_only__" ]]; then
         echo "  $sort: FAILED (continuing with next sort)"
       fi
     done
+  else
+    # Parallel ingests — max MAX_PARALLEL_INGEST at a time
+    # Each writes to a different score table, so no DB contention.
+    echo "  Running ingests (max $MAX_PARALLEL_INGEST concurrent)..."
+    INGEST_PIDS=()
+    INGEST_LOG_DIR=$(mktemp -d)
+
+    for sort in "${SORTS[@]}"; do
+      wait_for_slot "$MAX_PARALLEL_INGEST"
+      echo "    Starting $sort ingest..."
+      (
+        $PIPELINE python "$sort/ingest.py" \
+          > "$INGEST_LOG_DIR/$sort.log" 2>&1
+      ) &
+      INGEST_PIDS+=($!)
+    done
+
+    # Wait for all ingests
+    INGEST_FAILED=()
+    for i in "${!SORTS[@]}"; do
+      sort="${SORTS[$i]}"
+      pid="${INGEST_PIDS[$i]}"
+      if wait "$pid"; then
+        echo "    $sort ingest: OK"
+      else
+        echo "    $sort ingest: FAILED (see $INGEST_LOG_DIR/$sort.log)"
+        INGEST_FAILED+=("$sort")
+      fi
+    done
+
+    if [[ ${#INGEST_FAILED[@]} -gt 0 ]]; then
+      echo ""
+      echo "  WARNING: ${#INGEST_FAILED[@]} ingest(s) failed: ${INGEST_FAILED[*]}"
+      echo "  Check logs in: $INGEST_LOG_DIR/"
+    else
+      rm -rf "$INGEST_LOG_DIR" 2>/dev/null || true
+    fi
   fi
   elapsed
 fi

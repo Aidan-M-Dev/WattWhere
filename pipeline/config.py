@@ -55,6 +55,14 @@ OSM_POWER_FILE = DATA_ROOT / "energy" / "osm_ireland_power.gpkg"
 # OSM power infrastructure: power=substation, power=line, power=tower
 # Extract from Geofabrik Ireland dump, filter power=*
 
+SEAI_WIND_FARMS_FILE = DATA_ROOT / "energy" / "seai_wind_farms.csv"
+# SEAI connected wind farm data — CSV with ITM coords + capacity
+# Downloaded from seaiopendata.blob.core.windows.net
+
+OSM_GENERATORS_FILE = DATA_ROOT / "energy" / "osm_generators.gpkg"
+# OSM power=generator and power=plant features for Ireland
+# Downloaded via Overpass API (run energy/download_sources.py)
+
 # ── Environment sources ───────────────────────────────────────
 # See ireland-data-sources.md §4, §10
 NPWS_SAC_FILE = DATA_ROOT / "environment" / "npws_sac.gpkg"

@@ -75,6 +75,7 @@ SORTS_METADATA: list[SortMeta] = [
             MetricMeta(key="cooling_score",        label="Cooling sub-score",    unit="0–100",        isDefault=False),
             MetricMeta(key="connectivity_score",   label="Connectivity sub-score",unit="0–100",       isDefault=False),
             MetricMeta(key="planning_score",       label="Planning sub-score",   unit="0–100",        isDefault=False),
+            MetricMeta(key="population_density",   label="Population density",   unit="/km²",         isDefault=False),
         ],
     ),
     SortMeta(

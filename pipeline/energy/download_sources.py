@@ -36,7 +36,7 @@ from scipy.interpolate import griddata
 from shapely.geometry import shape
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from config import WIND_ATLAS_FILE, SOLAR_ATLAS_FILE, OSM_POWER_FILE
+from config import WIND_ATLAS_FILE, SOLAR_ATLAS_FILE, OSM_POWER_FILE, SEAI_WIND_FARMS_FILE, OSM_GENERATORS_FILE
 
 # Ireland bounding box WGS84
 IRE_LON_MIN, IRE_LON_MAX = -11.0, -5.5
@@ -255,6 +255,109 @@ def download_osm_power():
     print(f"  Saved to {OSM_POWER_FILE}")
 
 
+# ── SEAI wind farm data — CSV download ────────────────────────────────────────
+
+SEAI_WIND_CSV_URL = "https://seaiopendata.blob.core.windows.net/wind/WindFarmsConnectedJune2022.csv"
+
+
+def download_seai_wind_farms():
+    if SEAI_WIND_FARMS_FILE.exists():
+        print(f"[seai] Already present: {SEAI_WIND_FARMS_FILE}")
+        return
+
+    data = _download(SEAI_WIND_CSV_URL, "SEAI connected wind farms CSV")
+    SEAI_WIND_FARMS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    SEAI_WIND_FARMS_FILE.write_bytes(data)
+    print(f"  Saved to {SEAI_WIND_FARMS_FILE}")
+
+
+# ── OSM generators (power=generator + power=plant) — Overpass API ─────────────
+
+_OVERPASS_GENERATORS_QUERY = """
+[out:json][timeout:180];
+area(3600062273)->.irl;
+(
+  node["power"="generator"](area.irl);
+  way["power"="generator"](area.irl);
+  relation["power"="generator"](area.irl);
+  node["power"="plant"](area.irl);
+  way["power"="plant"](area.irl);
+  relation["power"="plant"](area.irl);
+);
+out geom;
+"""
+
+
+def download_osm_generators():
+    if OSM_GENERATORS_FILE.exists():
+        print(f"[osm-gen] Already present: {OSM_GENERATORS_FILE}")
+        return
+
+    # Rate-limit: sleep before querying Overpass again (runs after download_osm_power)
+    print("  Sleeping 5s to avoid Overpass rate limiting...")
+    time.sleep(5)
+
+    print("  Querying Overpass API for Ireland power generators & plants...")
+    encoded = urllib.parse.urlencode({"data": _OVERPASS_GENERATORS_QUERY}).encode()
+    req = urllib.request.Request(
+        _OVERPASS_URL,
+        data=encoded,
+        headers={"User-Agent": "HackEurope-pipeline/1.0"},
+    )
+    with urllib.request.urlopen(req, timeout=240) as resp:
+        raw = resp.read()
+    print(f"  Response size: {len(raw) / 1_048_576:.1f} MB")
+
+    data = json.loads(raw)
+    elements = data.get("elements", [])
+    print(f"  OSM elements returned: {len(elements)}")
+
+    rows = []
+    for el in elements:
+        el_type = el.get("type")
+        tags = el.get("tags", {})
+
+        if el_type == "node":
+            geom = {"type": "Point", "coordinates": [el["lon"], el["lat"]]}
+        elif el_type == "way":
+            coords = [[n["lon"], n["lat"]] for n in el.get("geometry", [])]
+            if not coords:
+                continue
+            if coords[0] == coords[-1] and len(coords) >= 4:
+                geom = {"type": "Polygon", "coordinates": [coords]}
+            else:
+                geom = {"type": "LineString", "coordinates": coords}
+        elif el_type == "relation":
+            bounds = el.get("bounds")
+            if not bounds:
+                continue
+            cx = (bounds["minlon"] + bounds["maxlon"]) / 2
+            cy = (bounds["minlat"] + bounds["maxlat"]) / 2
+            geom = {"type": "Point", "coordinates": [cx, cy]}
+        else:
+            continue
+
+        rows.append({
+            "osm_id": str(el.get("id", "")),
+            "power": tags.get("power"),
+            "generator_source": tags.get("generator:source"),
+            "generator_output": tags.get("generator:output:electricity"),
+            "generator_method": tags.get("generator:method"),
+            "name": tags.get("name"),
+            "operator": tags.get("operator"),
+            "geometry": shape(geom),
+        })
+
+    gdf = gpd.GeoDataFrame(rows, crs="EPSG:4326")
+    print(f"  Features: {len(gdf)}")
+    if "generator_source" in gdf.columns:
+        print(f"  Generator sources: {dict(gdf['generator_source'].value_counts())}")
+
+    OSM_GENERATORS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    gdf.to_file(str(OSM_GENERATORS_FILE), driver="GPKG")
+    print(f"  Saved to {OSM_GENERATORS_FILE}")
+
+
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 def main():
@@ -262,14 +365,20 @@ def main():
     print("Downloading energy source data")
     print("=" * 60)
 
-    print("\n[1/3] Wind speed 100m — Global Wind Atlas")
+    print("\n[1/5] Wind speed 100m — Global Wind Atlas")
     download_wind()
 
-    print("\n[2/3] Solar GHI — NASA POWER")
+    print("\n[2/5] Solar GHI — NASA POWER")
     download_solar()
 
-    print("\n[3/3] OSM power infrastructure — Overpass API")
+    print("\n[3/5] OSM power infrastructure — Overpass API")
     download_osm_power()
+
+    print("\n[4/5] SEAI wind farm data")
+    download_seai_wind_farms()
+
+    print("\n[5/5] OSM generators — Overpass API")
+    download_osm_generators()
 
     print("\n" + "=" * 60)
     print("All source files ready. Run: python energy/ingest.py")

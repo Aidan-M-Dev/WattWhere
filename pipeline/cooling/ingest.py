@@ -531,7 +531,7 @@ def upsert_cooling_scores(df: pd.DataFrame, engine: sqlalchemy.Engine) -> int:
     pg_conn = engine.raw_connection()
     try:
         cur = pg_conn.cursor()
-        batch_size = 500
+        batch_size = 2000
         for i in tqdm(range(0, len(rows), batch_size), desc="Upserting cooling_scores"):
             execute_values(cur, sql, rows[i : i + batch_size])
         pg_conn.commit()

@@ -422,7 +422,7 @@ def upsert_connectivity_scores(df: pd.DataFrame, engine: sqlalchemy.Engine) -> i
     pg_conn = engine.raw_connection()
     try:
         cur = pg_conn.cursor()
-        batch_size = 500
+        batch_size = 2000
         for i in tqdm(range(0, len(rows), batch_size), desc="Upserting connectivity_scores"):
             execute_values(cur, sql, rows[i : i + batch_size])
         pg_conn.commit()
@@ -485,46 +485,56 @@ def upsert_pins_connectivity(
                 junctions_wgs = junctions_wgs.copy()
                 junctions_wgs["_itm_geom"] = junctions_itm.geometry.values
 
-                # Simple clustering: skip junctions within 500m of an already-added one
-                added_points = []
+                # Cluster junctions within 500m using STRtree (avoids O(n^2) distance loop)
+                from shapely.strtree import STRtree
+                import shapely
+
+                # Extract ITM centroids for clustering
+                itm_points = []
                 for _, row in junctions_wgs.iterrows():
-                    itm_geom = row["_itm_geom"]
-                    if itm_geom.geom_type != "Point":
-                        itm_geom = itm_geom.centroid
-                    too_close = False
-                    for ap in added_points:
-                        if itm_geom.distance(ap) < 500:
-                            too_close = True
-                            break
-                    if too_close:
-                        continue
-                    added_points.append(itm_geom)
+                    g = row["_itm_geom"]
+                    itm_points.append(g.centroid if g.geom_type != "Point" else g)
 
-                    geom = row.geometry
-                    if geom.geom_type != "Point":
-                        geom = geom.centroid
+                # Greedy clustering via spatial index
+                added_mask = np.zeros(len(itm_points), dtype=bool)
+                junction_pin_count = 0
+                if len(itm_points) > 0:
+                    tree = STRtree(itm_points)
+                    # For each point, find all neighbours within 500m
+                    for idx in range(len(itm_points)):
+                        if added_mask[idx]:
+                            continue
+                        # Mark all points within 500m as "consumed"
+                        neighbours = tree.query(itm_points[idx].buffer(500))
+                        added_mask[neighbours] = True
 
-                    name_col = _find_col(junctions_wgs, ["name", "Name", "NAME"])
-                    ref_col = _find_col(junctions_wgs, ["ref", "Ref", "REF"])
+                        row = junctions_wgs.iloc[idx]
+                        geom = row.geometry
+                        if geom.geom_type != "Point":
+                            geom = geom.centroid
 
-                    junction_name = None
-                    road_ref = None
-                    if name_col and pd.notna(row.get(name_col)):
-                        junction_name = str(row[name_col])
-                    if ref_col and pd.notna(row.get(ref_col)):
-                        road_ref = str(row[ref_col])
+                        j_name_col = _find_col(junctions_wgs, ["name", "Name", "NAME"])
+                        j_ref_col = _find_col(junctions_wgs, ["ref", "Ref", "REF"])
 
-                    pin_rows.append({
-                        "lng": geom.x,
-                        "lat": geom.y,
-                        "name": junction_name or road_ref or "Motorway Junction",
-                        "type": "motorway_junction",
-                        "ix_asn": None,
-                        "road_ref": road_ref,
-                        "ix_details": None,
-                    })
+                        junction_name = None
+                        road_ref = None
+                        if j_name_col and pd.notna(row.get(j_name_col)):
+                            junction_name = str(row[j_name_col])
+                        if j_ref_col and pd.notna(row.get(j_ref_col)):
+                            road_ref = str(row[j_ref_col])
 
-                print(f"  Motorway junctions: {len(junctions)} total → {len(added_points)} after clustering")
+                        pin_rows.append({
+                            "lng": geom.x,
+                            "lat": geom.y,
+                            "name": junction_name or road_ref or "Motorway Junction",
+                            "type": "motorway_junction",
+                            "ix_asn": None,
+                            "road_ref": road_ref,
+                            "ix_details": None,
+                        })
+                        junction_pin_count += 1
+
+                print(f"  Motorway junctions: {len(junctions)} total → {junction_pin_count} after clustering")
 
     # ── Broadband area pins (top-50 UFBB polygons by area) ─────────────────
     if comreg is not None:

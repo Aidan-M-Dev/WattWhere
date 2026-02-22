@@ -449,6 +449,11 @@ function cleanupCustomSources() {
  * Client-side tile blending: read normalised values from each custom metric
  * source, compute weighted average per tile_id, update fill-color via match expression.
  * Called on every 'idle' event while custom mode is active.
+ *
+ * NULL handling: MVT features with NULL values (absent 'value' property) are
+ * skipped per-metric. A tile's score is the weighted average of whichever
+ * selected metrics DO have data for it. This ensures factors like SPA blocking
+ * (encoded in designation_overlap) only affect the blend when explicitly selected.
  */
 function computeCustomBlend() {
   if (!map || !map.isStyleLoaded()) return
@@ -465,33 +470,35 @@ function computeCustomBlend() {
         const tid = f.properties?.tile_id as number
         if (tid == null) continue
         if (!tileValues.has(tid)) tileValues.set(tid, new Array(n).fill(null))
-        tileValues.get(tid)![i] = (f.properties?.value as number) ?? 0
+        // Preserve NULL: only store numeric values, leave null for absent data
+        const val = f.properties?.value
+        tileValues.get(tid)![i] = (val != null) ? (val as number) : null
       }
     } catch { /* source not loaded yet */ }
   }
 
-  const totalWeight = metrics.reduce((s, cm) => s + cm.weight, 0)
-  if (totalWeight === 0) return
-
   const matchPairs: number[] = []
   for (const [tid, values] of tileValues) {
-    let weighted = 0
-    let complete = true
+    let weightedSum = 0
+    let activeWeight = 0
     for (let i = 0; i < n; i++) {
-      if (values[i] == null) { complete = false; break }
-      weighted += (values[i]! / totalWeight) * metrics[i].weight
+      if (values[i] == null) continue  // skip metrics with no data for this tile
+      weightedSum += values[i]! * metrics[i].weight
+      activeWeight += metrics[i].weight
     }
-    if (complete) {
-      matchPairs.push(tid, Math.round(Math.max(0, Math.min(100, weighted))))
+    if (activeWeight > 0) {
+      matchPairs.push(tid, Math.round(Math.max(0, Math.min(100, weightedSum / activeWeight))))
     }
   }
 
   if (!matchPairs.length) return
 
+  // Fallback 50 (neutral mid-range) for tiles not yet loaded, instead of 0
+  // which would make them appear blocked/excluded
   const ramp = COLOR_RAMPS['custom']
   map.setPaintProperty('tiles-fill', 'fill-color', [
     'interpolate', ['linear'],
-    ['match', ['get', 'tile_id'], ...matchPairs, 0],
+    ['match', ['get', 'tile_id'], ...matchPairs, 50],
     ...ramp.stops.flatMap(([stop, color]) => [stop, color]),
   ] as unknown as maplibregl.ExpressionSpecification)
 }
@@ -507,7 +514,11 @@ function getCustomTileScores(tileId: number): Map<string, number> {
       const features = map.querySourceFeatures(customSourceIds[i], { sourceLayer: 'tile_heatmap' })
       const f = features.find(f => f.properties?.tile_id === tileId)
       if (f) {
-        scores.set(`${metrics[i].sort}:${metrics[i].metric}`, (f.properties?.value as number) ?? 0)
+        // Only store score if the value property exists (not NULL from Martin)
+        const val = f.properties?.value
+        if (val != null) {
+          scores.set(`${metrics[i].sort}:${metrics[i].metric}`, val as number)
+        }
       }
     } catch { /* source not loaded */ }
   }
@@ -528,6 +539,18 @@ watch(() => store.martinTileUrl, (newUrl) => {
   map.setPaintProperty('tiles-fill', 'fill-color', buildColorExpression())
   // Clean up custom sources when switching away from custom
   if (store.activeSort !== 'custom') {
+    cleanupCustomSources()
+  }
+})
+
+// When activeSort changes, always rebuild the fill-color expression.
+// This is essential for the custom → overall transition where martinTileUrl
+// doesn't change (both resolve to overall/score), so the martinTileUrl watcher
+// doesn't fire and the custom blend match expression persists on the map.
+watch(() => store.activeSort, (newSort, oldSort) => {
+  if (!map || !map.isStyleLoaded()) return
+  map.setPaintProperty('tiles-fill', 'fill-color', buildColorExpression())
+  if (oldSort === 'custom' && newSort !== 'custom') {
     cleanupCustomSources()
   }
 })

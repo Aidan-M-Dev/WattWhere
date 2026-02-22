@@ -103,10 +103,15 @@ function getIcon(iconName: string): Component {
 
 // ── Computed ──────────────────────────────────────────────────
 
-/** Sub-metrics for the currently active sort, from sortsMeta */
-const activeMetrics = computed(() =>
-  store.activeSortMeta?.metrics ?? []
-)
+/** Sub-metrics for the currently active sort, from sortsMeta.
+ *  For Overall, hide the per-sort sub-score pills (visible in their own tabs). */
+const activeMetrics = computed(() => {
+  const metrics = store.activeSortMeta?.metrics ?? []
+  if (store.activeSort === 'overall') {
+    return metrics.filter(m => !m.key.endsWith('_score'))
+  }
+  return metrics
+})
 
 // ── Handlers ──────────────────────────────────────────────────
 

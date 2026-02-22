@@ -75,23 +75,24 @@ function getNormScore(sort: string, metric: string): number | null {
   return val != null ? val : null
 }
 
-/** Compute weighted composite from normalised scores */
+/** Compute weighted composite from normalised scores.
+ *  Only metrics with data contribute — missing metrics are excluded from
+ *  the weight denominator so factors like SPA blocking don't leak in
+ *  unless the user explicitly selected those metrics. */
 const compositeScore = computed(() => {
   const metrics = store.customMetrics
   if (!metrics.length) return null
-  const totalWeight = metrics.reduce((s, cm) => s + cm.weight, 0)
-  if (totalWeight === 0) return null
 
   let weightedSum = 0
-  let hasAny = false
+  let activeWeight = 0
   for (const cm of metrics) {
     const score = getNormScore(cm.sort, cm.metric)
     if (score != null) {
-      weightedSum += score * (cm.weight / totalWeight)
-      hasAny = true
+      weightedSum += score * cm.weight
+      activeWeight += cm.weight
     }
   }
-  return hasAny ? weightedSum : null
+  return activeWeight > 0 ? weightedSum / activeWeight : null
 })
 
 function formatRaw(val: number, unit: string): string {
