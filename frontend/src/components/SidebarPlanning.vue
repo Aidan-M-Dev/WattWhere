@@ -59,6 +59,23 @@
       <div class="no-data" v-else>No planning applications in this tile</div>
     </section>
 
+    <!-- Land Pricing -->
+    <section class="section" v-if="data.land_price_score !== null || data.avg_price_per_sqm_eur !== null">
+      <h3 class="section__title">Land Pricing <a href="https://www.propertypriceregister.ie" target="_blank" rel="noopener" class="source-link">source ↗</a></h3>
+      <div class="kv-row" v-if="data.land_price_score !== null">
+        <span class="kv-row__label">Price score</span>
+        <span class="kv-row__value">{{ data.land_price_score }}<span class="kv-row__unit">/100</span></span>
+      </div>
+      <div class="kv-row" v-if="data.avg_price_per_sqm_eur !== null">
+        <span class="kv-row__label">Avg property price</span>
+        <span class="kv-row__value">{{ formatEur(data.avg_price_per_sqm_eur) }}/m²</span>
+      </div>
+      <div class="kv-row" v-if="data.transaction_count !== null && data.transaction_count > 0">
+        <span class="kv-row__label">Transactions</span>
+        <span class="kv-row__value">{{ data.transaction_count.toLocaleString() }}</span>
+      </div>
+    </section>
+
     <!-- IDA sites + population -->
     <section class="section">
       <h3 class="section__title">Context <a href="https://www.idaireland.com/locate-in-ireland/available-properties" target="_blank" rel="noopener" class="source-link">source ↗</a></h3>
@@ -83,6 +100,10 @@ import { computed } from 'vue'
 import type { TilePlanning } from '@/types'
 
 const props = defineProps<{ data: TilePlanning }>()
+
+function formatEur(val: number): string {
+  return '€' + val.toLocaleString('en-IE', { maximumFractionDigits: 0 })
+}
 
 // Zoning segment config (colour matches planning sort ramp family)
 const zoningSegments = computed(() => [
@@ -124,4 +145,5 @@ const zoningSegments = computed(() => [
 .kv-row { display: flex; justify-content: space-between; font-size: 13px; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.06); }
 .kv-row__label { color: rgba(255,255,255,0.5); }
 .kv-row__value { color: white; font-weight: 500; }
+.kv-row__unit { font-weight: 400; color: rgba(255,255,255,0.35); font-size: 11px; }
 </style>

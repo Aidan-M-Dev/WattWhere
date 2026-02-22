@@ -340,7 +340,17 @@ def seed_planning(conn, tiles) -> dict:
 
     zoning_tier = np.clip((pct_industrial + pct_enterprise) * 0.9, 0.0, 100.0)
     planning_precedent = np.random.uniform(0.0, 60.0, n)
-    score = np.clip(zoning_tier * 0.7 + planning_precedent * 0.3, 0.0, 100.0)
+    # Synthetic land pricing: price/m² varies by "desirability" (higher zoning_tier → higher demand → higher price)
+    avg_price_per_sqm = np.random.uniform(1000, 8000, n) + zoning_tier * 30
+    land_price_score = np.clip(
+        100 - (avg_price_per_sqm - avg_price_per_sqm.min()) / max(avg_price_per_sqm.max() - avg_price_per_sqm.min(), 1) * 100,
+        0, 100,
+    )
+    transaction_count = np.random.randint(0, 200, n)
+    score = np.clip(
+        zoning_tier * 0.42 + land_price_score * 0.28 + planning_precedent * 0.3,
+        0.0, 100.0,
+    )
 
     records = [
         (
@@ -357,6 +367,9 @@ def seed_planning(conn, tiles) -> dict:
             None,   # nearest_ida_site_km
             None,   # population_density_per_km2
             None,   # county_dev_plan_ref
+            round(float(land_price_score[i])),
+            round(float(avg_price_per_sqm[i]), 2),
+            int(transaction_count[i]),
         )
         for i in range(n)
     ]
@@ -371,7 +384,8 @@ def seed_planning(conn, tiles) -> dict:
                 zoning_tier, planning_precedent,
                 pct_industrial, pct_enterprise, pct_mixed_use,
                 pct_agricultural, pct_residential, pct_other,
-                nearest_ida_site_km, population_density_per_km2, county_dev_plan_ref
+                nearest_ida_site_km, population_density_per_km2, county_dev_plan_ref,
+                land_price_score, avg_price_per_sqm_eur, transaction_count
             ) VALUES %s
             """,
             records,
@@ -472,10 +486,11 @@ def seed_overall(
 
 def seed_metric_ranges(conn) -> None:
     ranges = [
-        ("energy",  "wind_speed_100m", 4.0,   12.5,   "m/s"),
-        ("energy",  "solar_ghi",       900.0, 1250.0, "kWh/m\u00b2/yr"),
-        ("cooling", "temperature",     8.5,   13.5,   "\u00b0C"),
-        ("cooling", "rainfall",        700.0, 2500.0, "mm/yr"),
+        ("energy",   "wind_speed_100m",       4.0,    12.5,    "m/s"),
+        ("energy",   "solar_ghi",             900.0,  1250.0,  "kWh/m\u00b2/yr"),
+        ("cooling",  "temperature",           8.5,    13.5,    "\u00b0C"),
+        ("cooling",  "rainfall",              700.0,  2500.0,  "mm/yr"),
+        ("planning", "avg_price_per_sqm_eur", 1000.0, 11000.0, "\u20ac/m\u00b2"),
     ]
 
     with conn.cursor() as cur:

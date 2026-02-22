@@ -267,6 +267,9 @@ async def _get_planning(conn: asyncpg.Connection, tile_id: int, base: dict) -> d
         "nearest_ida_site_km": _f(row["nearest_ida_site_km"]),
         "population_density_per_km2": _f(row["population_density_per_km2"]),
         "county_dev_plan_ref": row["county_dev_plan_ref"],
+        "land_price_score": _f(row["land_price_score"]),
+        "avg_price_per_sqm_eur": _f(row["avg_price_per_sqm_eur"]),
+        "transaction_count": int(row["transaction_count"]) if row["transaction_count"] is not None else None,
         "planning_applications": [
             {
                 "app_ref": a["app_ref"],

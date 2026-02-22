@@ -44,7 +44,7 @@ from psycopg2.extras import execute_values
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from config import (
     DB_URL, MYPLAN_ZONING_FILE, PLANNING_APPLICATIONS_FILE,
-    CSO_POPULATION_FILE, GRID_CRS_ITM
+    CSO_POPULATION_FILE, PPR_FILE, OSM_SETTLEMENTS_FILE, GRID_CRS_ITM
 )
 
 # Zoning category mapping — MyPlan GZT codes to our categories
@@ -473,17 +473,287 @@ def compute_nearest_ida_km(tiles: gpd.GeoDataFrame, engine: sqlalchemy.Engine) -
     return min_dist.reindex(tiles["tile_id"]).rename("nearest_ida_site_km")
 
 
+def compute_land_pricing(
+    tiles: gpd.GeoDataFrame,
+    ppr_path: Path,
+    settlements_path: Path,
+) -> pd.DataFrame:
+    """
+    Compute per-tile land pricing metrics from Property Price Register transactions.
+
+    Pipeline:
+      1. Load PPR CSV (individual sale transactions)
+      2. Parse price and property size to estimate €/m²
+      3. Geocode addresses via OSM settlement point matching
+      4. Spatial join geocoded transactions to tiles
+      5. Compute per-tile median price/m² and transaction count
+
+    Returns DataFrame with tile_id, avg_price_per_sqm_eur, transaction_count.
+    """
+    # ── Load PPR ───────────────────────────────────────────────
+    print("  Loading PPR CSV...")
+    # PPR CSV uses €-prefixed prices and Irish date format
+    ppr = pd.read_csv(ppr_path, encoding="latin-1")
+
+    # Normalise column names — PPR headers sometimes have \ufeff BOM or extra spaces
+    ppr.columns = ppr.columns.str.strip().str.replace("\ufeff", "")
+
+    # Detect price column
+    price_col = None
+    for c in ppr.columns:
+        if "price" in c.lower() and "not full" not in c.lower():
+            price_col = c
+            break
+    if price_col is None:
+        print("  WARNING: No price column found in PPR. Skipping land pricing.")
+        return pd.DataFrame({"tile_id": tiles["tile_id"], "avg_price_per_sqm_eur": np.nan, "transaction_count": 0})
+
+    # Clean price: remove € symbol, commas, convert to float
+    ppr["_price"] = (
+        ppr[price_col]
+        .astype(str)
+        .str.replace("€", "", regex=False)
+        .str.replace(",", "", regex=False)
+        .str.strip()
+    )
+    ppr["_price"] = pd.to_numeric(ppr["_price"], errors="coerce")
+    ppr = ppr.dropna(subset=["_price"])
+    ppr = ppr[ppr["_price"] > 0]
+
+    # Parse date and filter to recent years (last 3 years for relevance)
+    date_col = _find_col(ppr, ["Date of Sale (dd/mm/yyyy)", "Date of Sale", "SALE_DATE", "Date"])
+    if date_col:
+        ppr["_date"] = pd.to_datetime(ppr[date_col], dayfirst=True, errors="coerce")
+        cutoff = ppr["_date"].max() - pd.DateOffset(years=3)
+        before = len(ppr)
+        ppr = ppr[ppr["_date"] >= cutoff]
+        print(f"  Filtered to last 3 years: {before} → {len(ppr)} transactions")
+
+    # Estimate price per m² from Property Size Description
+    size_col = _find_col(ppr, ["Property Size Description", "SIZE_DESC", "Property_Size"])
+    if size_col:
+        # Map size categories to midpoint m² estimates
+        size_map = {
+            "greater than or equal to 38 sq metres and less than 125 sq metres": 80.0,
+            "greater than or equal to 125 sq metres": 180.0,
+            "less than 38 sq metres": 25.0,
+            "greater than 125 sq metres": 180.0,
+        }
+        ppr["_sqm"] = ppr[size_col].astype(str).str.strip().str.lower().map(
+            {k.lower(): v for k, v in size_map.items()}
+        )
+        # Default to 100 m² for unmapped sizes
+        ppr["_sqm"] = ppr["_sqm"].fillna(100.0)
+    else:
+        ppr["_sqm"] = 100.0  # default assumption
+
+    ppr["_price_per_sqm"] = ppr["_price"] / ppr["_sqm"]
+
+    # Remove extreme outliers (< 1st percentile, > 99th percentile)
+    p1, p99 = ppr["_price_per_sqm"].quantile([0.01, 0.99])
+    ppr = ppr[(ppr["_price_per_sqm"] >= p1) & (ppr["_price_per_sqm"] <= p99)]
+    print(f"  After outlier removal: {len(ppr)} transactions, price/m² range: €{p1:.0f}–€{p99:.0f}")
+
+    # ── Geocode via OSM settlement matching ────────────────────
+    # Detect address column
+    addr_col = _find_col(ppr, ["Address", "ADDRESS", "address"])
+    county_col = _find_col(ppr, ["County", "COUNTY", "county"])
+
+    if settlements_path.exists():
+        print("  Loading OSM settlement points for geocoding...")
+        settlements = gpd.read_file(str(settlements_path))
+        if settlements.crs is None or settlements.crs.to_epsg() != 2157:
+            settlements = settlements.to_crs(GRID_CRS_ITM)
+        if settlements.geometry.name != "geometry":
+            settlements = settlements.rename_geometry("geometry")
+
+        name_col_s = _find_col(settlements, ["name", "NAME", "Name"])
+        if name_col_s is None:
+            name_col_s = settlements.columns[0]
+
+        # Build lookup: lowercase settlement name → ITM point
+        settlement_lookup: dict[str, object] = {}
+        for _, srow in settlements.iterrows():
+            sname = str(srow[name_col_s]).strip().lower()
+            if sname and sname != "nan":
+                settlement_lookup[sname] = srow.geometry
+
+        print(f"  Settlement lookup: {len(settlement_lookup)} entries")
+
+        # Match PPR addresses to settlements
+        matched_points = []
+        for _, row in ppr.iterrows():
+            addr = str(row[addr_col]) if addr_col else ""
+            pt = _geocode_address(addr, settlement_lookup)
+            matched_points.append(pt)
+
+        ppr["_geom"] = matched_points
+        geocoded = ppr.dropna(subset=["_geom"])
+        print(f"  Geocoded {len(geocoded)} of {len(ppr)} transactions ({len(geocoded)/len(ppr)*100:.0f}%)")
+    else:
+        print("  WARNING: OSM settlements file not found — falling back to county centroid geocoding")
+        geocoded = ppr.copy()
+        geocoded["_geom"] = None
+        settlement_lookup = {}
+
+    # Fallback: county centroid for ungeocodable records
+    if county_col and len(geocoded) < len(ppr):
+        county_centroids = _get_county_centroids(tiles)
+        ungeocodable = ppr[ppr.index.isin(geocoded.index) == False].copy()
+        fallback_points = []
+        for _, row in ungeocodable.iterrows():
+            county = str(row[county_col]).strip()
+            pt = county_centroids.get(county.lower())
+            fallback_points.append(pt)
+        ungeocodable["_geom"] = fallback_points
+        ungeocodable = ungeocodable.dropna(subset=["_geom"])
+        geocoded = pd.concat([geocoded, ungeocodable], ignore_index=True)
+        print(f"  After county fallback: {len(geocoded)} geocoded transactions total")
+
+    if len(geocoded) == 0:
+        print("  WARNING: No transactions geocoded. Returning empty land pricing.")
+        return pd.DataFrame({"tile_id": tiles["tile_id"], "avg_price_per_sqm_eur": np.nan, "transaction_count": 0})
+
+    # ── Spatial join to tiles ──────────────────────────────────
+    print("  Spatial joining transactions to tiles...")
+    gdf = gpd.GeoDataFrame(
+        geocoded,
+        geometry=geocoded["_geom"].tolist(),
+        crs=GRID_CRS_ITM,
+    )
+
+    joined = gpd.sjoin(gdf, tiles[["tile_id", "geometry"]], how="inner", predicate="within")
+
+    # Aggregate per tile
+    tile_stats = joined.groupby("tile_id").agg(
+        avg_price_per_sqm_eur=("_price_per_sqm", "median"),
+        transaction_count=("_price_per_sqm", "count"),
+    ).reset_index()
+
+    # Merge back to all tiles
+    result = tiles[["tile_id"]].merge(tile_stats, on="tile_id", how="left")
+    result["avg_price_per_sqm_eur"] = result["avg_price_per_sqm_eur"].astype(float)
+    result["transaction_count"] = result["transaction_count"].fillna(0).astype(int)
+
+    # For tiles with no direct transactions, interpolate from neighbours (IDW)
+    has_data = result["avg_price_per_sqm_eur"].notna()
+    missing = ~has_data
+    if missing.any() and has_data.sum() > 10:
+        print(f"  Interpolating {missing.sum()} tiles with no direct transactions...")
+        result = _interpolate_missing_prices(result, tiles)
+
+    print(f"  Land pricing: {has_data.sum()} tiles with direct data, "
+          f"median €{result['avg_price_per_sqm_eur'].median():.0f}/m²")
+
+    return result
+
+
+def _geocode_address(address: str, settlement_lookup: dict) -> object | None:
+    """
+    Match an address string to an OSM settlement point.
+    Extracts town/city/village names from the address and looks up in the settlement dict.
+    Returns ITM point geometry or None.
+    """
+    if not address or address == "nan":
+        return None
+
+    # PPR addresses are comma-separated: "Unit 5, Main Street, Killarney, Co. Kerry"
+    # Try matching each address component against settlements
+    parts = [p.strip().lower() for p in address.split(",")]
+
+    # Try parts from right to left (more specific → less specific)
+    # Skip the last part if it looks like a county
+    for part in reversed(parts):
+        if part.startswith("co.") or part.startswith("county"):
+            continue
+        # Clean common prefixes
+        cleaned = part.strip()
+        if cleaned in settlement_lookup:
+            return settlement_lookup[cleaned]
+
+    # Try substrings — sometimes the town is embedded in a longer part
+    for part in reversed(parts):
+        if part.startswith("co.") or part.startswith("county"):
+            continue
+        for sname, sgeom in settlement_lookup.items():
+            if len(sname) >= 4 and sname in part:
+                return sgeom
+
+    return None
+
+
+def _get_county_centroids(tiles: gpd.GeoDataFrame) -> dict:
+    """Get approximate county centroids from tile data (in ITM). Returns {county_lower: Point}."""
+    # tiles has a 'centroid' column in WGS84, but geometry is in ITM
+    # Use tile centroids grouped by county
+    # Need to join county info — load from DB
+    try:
+        from sqlalchemy import create_engine, text as sa_text
+        engine = create_engine(DB_URL)
+        with engine.connect() as conn:
+            rows = conn.execute(sa_text(
+                "SELECT DISTINCT county, ST_X(ST_Transform(ST_Centroid(ST_Collect(geom)), 2157)) AS x, "
+                "ST_Y(ST_Transform(ST_Centroid(ST_Collect(geom)), 2157)) AS y "
+                "FROM tiles GROUP BY county"
+            ))
+            from shapely.geometry import Point as ShapelyPoint
+            return {r[0].lower(): ShapelyPoint(r[1], r[2]) for r in rows}
+    except Exception:
+        return {}
+
+
+def _interpolate_missing_prices(result: pd.DataFrame, tiles: gpd.GeoDataFrame) -> pd.DataFrame:
+    """
+    Fill missing tile prices using inverse-distance weighted interpolation
+    from nearby tiles that have data. Simple IDW with k=5 nearest neighbours.
+    """
+    from shapely.geometry import Point as ShapelyPoint
+
+    # Get tile centroids in ITM
+    centroids = tiles.set_index("tile_id").geometry.centroid
+
+    has_data = result.set_index("tile_id")
+    known = has_data[has_data["avg_price_per_sqm_eur"].notna()]
+    unknown = has_data[has_data["avg_price_per_sqm_eur"].isna()]
+
+    if len(known) == 0 or len(unknown) == 0:
+        return result
+
+    # Build arrays for vectorised distance computation
+    known_xy = np.array([(centroids[tid].x, centroids[tid].y) for tid in known.index if tid in centroids.index])
+    known_prices = known.loc[[tid for tid in known.index if tid in centroids.index], "avg_price_per_sqm_eur"].values
+
+    for tid in unknown.index:
+        if tid not in centroids.index:
+            continue
+        cx, cy = centroids[tid].x, centroids[tid].y
+        dists = np.sqrt((known_xy[:, 0] - cx) ** 2 + (known_xy[:, 1] - cy) ** 2)
+        # k nearest
+        k = min(5, len(dists))
+        nearest_idx = np.argpartition(dists, k)[:k]
+        nearest_dists = dists[nearest_idx]
+        nearest_prices = known_prices[nearest_idx]
+        # IDW weights (avoid division by zero)
+        weights = 1.0 / np.maximum(nearest_dists, 100.0)
+        interpolated = np.average(nearest_prices, weights=weights)
+        result.loc[result["tile_id"] == tid, "avg_price_per_sqm_eur"] = interpolated
+
+    return result
+
+
 def compose_planning_scores(
     zoning_df: pd.DataFrame,
     planning_df: pd.DataFrame,
     pop_density: pd.Series,
     ida_km: pd.Series,
+    land_pricing_df: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """
     Compose planning_scores from sub-metrics.
 
     Final score formula (capped 0–100):
-      base = zoning_tier
+      base = 0.6 * zoning_tier + 0.4 * land_price_score (if available)
+             else zoning_tier alone
       + 10 if planning_precedent > 40 (DC planning history nearby)
       − 20 if pct_residential > 0 (residential zoning present)
       clamp to [0, 100]
@@ -497,8 +767,37 @@ def compose_planning_scores(
     )
     result["planning_precedent"] = result["planning_precedent"].fillna(0)
 
+    # Merge land pricing if available
+    if land_pricing_df is not None:
+        result = result.merge(
+            land_pricing_df[["tile_id", "avg_price_per_sqm_eur", "transaction_count"]],
+            on="tile_id", how="left",
+        )
+        # Normalise price to 0–100 INVERTED (lower price = higher score)
+        price_vals = result["avg_price_per_sqm_eur"]
+        price_min = price_vals.min()
+        price_max = price_vals.max()
+        if price_max > price_min:
+            result["land_price_score"] = (
+                100 - (price_vals - price_min) / (price_max - price_min) * 100
+            ).round(0).astype("Int16")
+        else:
+            result["land_price_score"] = pd.array([50] * len(result), dtype="Int16")
+    else:
+        result["avg_price_per_sqm_eur"] = np.nan
+        result["transaction_count"] = 0
+        result["land_price_score"] = pd.array([pd.NA] * len(result), dtype="Int16")
+
     # Compute final score
-    score = result["zoning_tier"].copy()
+    has_land_price = result["land_price_score"].notna()
+    base_score = result["zoning_tier"].copy()
+    # Blend zoning_tier with land_price_score where available
+    base_score = np.where(
+        has_land_price,
+        0.6 * result["zoning_tier"] + 0.4 * result["land_price_score"].fillna(0),
+        result["zoning_tier"],
+    )
+    score = pd.Series(base_score, index=result.index)
     score = score + np.where(result["planning_precedent"] > 40, 10, 0)
     score = score - np.where(result["pct_residential"] > 0, 20, 0)
     result["score"] = score.clip(0, 100).round(2)
@@ -517,7 +816,8 @@ def upsert_planning_scores(df: pd.DataFrame, engine: sqlalchemy.Engine) -> int:
             tile_id, score, zoning_tier, planning_precedent,
             pct_industrial, pct_enterprise, pct_mixed_use,
             pct_agricultural, pct_residential, pct_other,
-            nearest_ida_site_km, population_density_per_km2
+            nearest_ida_site_km, population_density_per_km2,
+            land_price_score, avg_price_per_sqm_eur, transaction_count
         ) VALUES %s
         ON CONFLICT (tile_id) DO UPDATE SET
             score                      = EXCLUDED.score,
@@ -530,7 +830,10 @@ def upsert_planning_scores(df: pd.DataFrame, engine: sqlalchemy.Engine) -> int:
             pct_residential            = EXCLUDED.pct_residential,
             pct_other                  = EXCLUDED.pct_other,
             nearest_ida_site_km        = EXCLUDED.nearest_ida_site_km,
-            population_density_per_km2 = EXCLUDED.population_density_per_km2
+            population_density_per_km2 = EXCLUDED.population_density_per_km2,
+            land_price_score           = EXCLUDED.land_price_score,
+            avg_price_per_sqm_eur      = EXCLUDED.avg_price_per_sqm_eur,
+            transaction_count          = EXCLUDED.transaction_count
     """
 
     cols = [
@@ -538,6 +841,7 @@ def upsert_planning_scores(df: pd.DataFrame, engine: sqlalchemy.Engine) -> int:
         "pct_industrial", "pct_enterprise", "pct_mixed_use",
         "pct_agricultural", "pct_residential", "pct_other",
         "nearest_ida_site_km", "population_density_per_km2",
+        "land_price_score", "avg_price_per_sqm_eur", "transaction_count",
     ]
 
     rows = [tuple(_to_py(row[c]) for c in cols) for _, row in df.iterrows()]
@@ -814,6 +1118,33 @@ def upsert_pins_planning(
     return len(pin_rows)
 
 
+def write_land_price_metric_ranges(scores_df: pd.DataFrame, engine: sqlalchemy.Engine) -> None:
+    """Write min/max for avg_price_per_sqm_eur to metric_ranges for Martin normalisation."""
+    price_vals = scores_df["avg_price_per_sqm_eur"].dropna()
+    if len(price_vals) == 0:
+        print("  No land price data — skipping metric_ranges write")
+        return
+
+    min_val = float(price_vals.min())
+    max_val = float(price_vals.max())
+
+    with engine.begin() as conn:
+        conn.execute(
+            text("""
+                INSERT INTO metric_ranges (sort, metric, min_val, max_val, unit)
+                VALUES (:sort, :metric, :min_val, :max_val, :unit)
+                ON CONFLICT (sort, metric) DO UPDATE SET
+                    min_val    = EXCLUDED.min_val,
+                    max_val    = EXCLUDED.max_val,
+                    unit       = EXCLUDED.unit,
+                    updated_at = now()
+            """),
+            {"sort": "planning", "metric": "avg_price_per_sqm_eur",
+             "min_val": min_val, "max_val": max_val, "unit": "€/m²"},
+        )
+    print(f"  Metric range written: avg_price_per_sqm_eur [{min_val:.0f}–{max_val:.0f} €/m²]")
+
+
 def main():
     """
     Planning ingest pipeline:
@@ -822,8 +1153,10 @@ def main():
       3. Spatial join planning applications
       4. Compute population density from CSO
       5. Compute nearest IDA site distance
-      6. Compose planning scores
-      7. Upsert planning_scores + tile_planning_applications + pins_planning
+      6. Compute land pricing from PPR
+      7. Compose planning scores
+      8. Upsert planning_scores + tile_planning_applications + pins_planning
+      9. Write metric_ranges for land pricing
 
     Run AFTER: grid/generate_grid.py
     Run BEFORE: overall/compute_composite.py
@@ -833,8 +1166,8 @@ def main():
     print("=" * 60)
 
     # ── Check source files exist ───────────────────────────────────────────
-    missing = [p for p in (MYPLAN_ZONING_FILE, PLANNING_APPLICATIONS_FILE, CSO_POPULATION_FILE)
-               if not p.exists()]
+    required = [MYPLAN_ZONING_FILE, PLANNING_APPLICATIONS_FILE, CSO_POPULATION_FILE]
+    missing = [p for p in required if not p.exists()]
     if missing:
         for p in missing:
             print(f"  ERROR: missing source file: {p}")
@@ -842,19 +1175,24 @@ def main():
         print("See ireland-data-sources.md §5, §9 for manual download instructions.")
         raise SystemExit(1)
 
+    has_ppr = PPR_FILE.exists()
+    if not has_ppr:
+        print(f"  WARNING: PPR file not found at {PPR_FILE}")
+        print("  Land pricing will be skipped. Download from propertypriceregister.ie")
+
     engine = sqlalchemy.create_engine(DB_URL)
 
     # ── Step 1: Load tiles ─────────────────────────────────────────────────
-    print("\n[1/9] Loading tiles from database...")
+    print("\n[1/11] Loading tiles from database...")
     tiles = load_tiles(engine)
     print(f"  Loaded {len(tiles)} tiles")
 
     # ── Step 2: Load and overlay zoning ────────────────────────────────────
-    print("\n[2/9] Loading MyPlan GZT zoning data...")
+    print("\n[2/11] Loading MyPlan GZT zoning data...")
     zoning = gpd.read_file(str(MYPLAN_ZONING_FILE))
     print(f"  Loaded {len(zoning)} zoning polygons")
 
-    print("\n[3/9] Computing zoning overlay...")
+    print("\n[3/11] Computing zoning overlay...")
     zoning_df = compute_zoning_overlay(tiles, zoning)
     print(f"  Zoning tier: min={zoning_df['zoning_tier'].min():.1f}, "
           f"max={zoning_df['zoning_tier'].max():.1f}, mean={zoning_df['zoning_tier'].mean():.1f}")
@@ -862,37 +1200,45 @@ def main():
           f"pct_residential={zoning_df['pct_residential'].mean():.1f}")
 
     # ── Step 3: Planning applications ──────────────────────────────────────
-    print("\n[4/9] Loading planning applications...")
+    print("\n[4/11] Loading planning applications...")
     applications = gpd.read_file(str(PLANNING_APPLICATIONS_FILE))
     print(f"  Loaded {len(applications)} planning applications")
 
-    print("\n[5/9] Computing planning applications overlay...")
+    print("\n[5/11] Computing planning applications overlay...")
     planning_df = compute_planning_applications(tiles, applications)
     print(f"  Planning precedent: min={planning_df['planning_precedent'].min():.1f}, "
           f"max={planning_df['planning_precedent'].max():.1f}, "
           f"tiles with precedent: {(planning_df['planning_precedent'] > 0).sum()}")
 
     # ── Step 4: Population density ─────────────────────────────────────────
-    print("\n[6/9] Loading CSO population data...")
+    print("\n[6/11] Loading CSO population data...")
     cso_pop = gpd.read_file(str(CSO_POPULATION_FILE))
     print(f"  Loaded {len(cso_pop)} small areas")
 
-    print("\n[7/9] Computing population density...")
+    print("\n[7/11] Computing population density...")
     pop_density = compute_population_density(tiles, cso_pop)
     print(f"  Population density: min={pop_density.min():.1f}, "
           f"max={pop_density.max():.1f}, mean={pop_density.mean():.1f} per km²")
 
     # ── Step 5: Nearest IDA site ───────────────────────────────────────────
-    print("\n[8/9] Computing nearest IDA site distance...")
+    print("\n[8/11] Computing nearest IDA site distance...")
     ida_km = compute_nearest_ida_km(tiles, engine)
     if ida_km.isna().all():
         print("  IDA sites not yet populated — skipping distance calculation")
     else:
         print(f"  IDA distance: min={ida_km.min():.1f}, max={ida_km.max():.1f} km")
 
-    # ── Step 6: Compose scores ─────────────────────────────────────────────
-    print("\n[9/9] Composing planning scores...")
-    scores_df = compose_planning_scores(zoning_df, planning_df, pop_density, ida_km)
+    # ── Step 6: Land pricing from PPR ──────────────────────────────────────
+    land_pricing_df = None
+    if has_ppr:
+        print("\n[9/11] Computing land pricing from PPR...")
+        land_pricing_df = compute_land_pricing(tiles, PPR_FILE, OSM_SETTLEMENTS_FILE)
+    else:
+        print("\n[9/11] Skipping land pricing (no PPR data)")
+
+    # ── Step 7: Compose scores ─────────────────────────────────────────────
+    print("\n[10/11] Composing planning scores...")
+    scores_df = compose_planning_scores(zoning_df, planning_df, pop_density, ida_km, land_pricing_df)
     print(f"  Score: min={scores_df['score'].min():.2f}, max={scores_df['score'].max():.2f}, "
           f"mean={scores_df['score'].mean():.2f}")
 
@@ -911,8 +1257,15 @@ def main():
     n_pins = upsert_pins_planning(zoning, applications, engine)
     print(f"  Inserted {n_pins} planning pins")
 
+    # ── Write metric_ranges for land pricing ──────────────────────────────
+    print("\n[11/11] Writing metric ranges...")
+    write_land_price_metric_ranges(scores_df, engine)
+
     print("\n" + "=" * 60)
     print(f"Planning ingest complete: {n} tiles scored, {n_apps} applications, {n_pins} pins")
+    if has_ppr:
+        lp_count = (scores_df["land_price_score"].notna()).sum()
+        print(f"  Land pricing: {lp_count} tiles with price data")
     print("Next step: run overall/compute_composite.py (after all sort pipelines complete)")
     print("=" * 60)
 

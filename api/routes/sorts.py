@@ -132,9 +132,11 @@ SORTS_METADATA: list[SortMeta] = [
         icon="Map",
         description="Favourability of local planning and zoning context for data centre development.",
         metrics=[
-            MetricMeta(key="score",               label="Planning Score",          unit="0–100", isDefault=True),
-            MetricMeta(key="zoning_tier",         label="Zoning tier score",       unit="0–100", isDefault=False),
-            MetricMeta(key="planning_precedent",  label="Planning precedent score",unit="0–100", isDefault=False),
+            MetricMeta(key="score",                  label="Planning Score",          unit="0–100",  isDefault=True),
+            MetricMeta(key="zoning_tier",            label="Zoning tier score",       unit="0–100",  isDefault=False),
+            MetricMeta(key="planning_precedent",     label="Planning precedent score",unit="0–100",  isDefault=False),
+            MetricMeta(key="land_price",             label="Land price score",        unit="0–100",  isDefault=False),
+            MetricMeta(key="avg_price_per_sqm_eur",  label="Property price (raw)",    unit="€/m²",   isDefault=False),
         ],
     ),
 ]

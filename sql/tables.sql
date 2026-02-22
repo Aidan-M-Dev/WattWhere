@@ -153,7 +153,10 @@ CREATE TABLE planning_scores (
     pct_other                  NUMERIC(5,2)  NOT NULL DEFAULT 0 CHECK (pct_other BETWEEN 0 AND 100),
     nearest_ida_site_km        NUMERIC(8,3),  -- denormalised for query speed; source of truth is ida_sites
     population_density_per_km2 NUMERIC(10,3),
-    county_dev_plan_ref        TEXT
+    county_dev_plan_ref        TEXT,
+    land_price_score           SMALLINT      CHECK (land_price_score BETWEEN 0 AND 100),
+    avg_price_per_sqm_eur      REAL,         -- median transaction price/m² from PPR (tile-level)
+    transaction_count          INTEGER       -- number of PPR transactions used for this tile's estimate
 );
 
 CREATE TABLE overall_scores (

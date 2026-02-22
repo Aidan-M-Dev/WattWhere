@@ -189,6 +189,9 @@ export interface TilePlanning extends TileBase {
   nearest_ida_site_km: number | null
   population_density_per_km2: number | null
   county_dev_plan_ref: string | null
+  land_price_score: number | null
+  avg_price_per_sqm_eur: number | null
+  transaction_count: number | null
   /** Planning applications within this tile */
   planning_applications: PlanningApplication[]
 }

@@ -108,6 +108,18 @@ PLANNING_APPLICATIONS_FILE = DATA_ROOT / "planning" / "planning_applications.gpk
 CSO_POPULATION_FILE = DATA_ROOT / "planning" / "cso_small_area_stats.gpkg"
 # CSO Small Area Population Statistics 2022
 
+PPR_FILE = DATA_ROOT / "planning" / "ppr.csv"
+# Property Price Register — individual transactions (address, price, date, type)
+# Download from propertypriceregister.ie → "Download the PPR" CSV link
+# Fields: Date, Address, County, Price, Not Full Market Price, VAT Exclusive,
+#         Description of Property, Property Size Description
+# ~500 K records; pipeline geocodes via OSM settlement points
+
+OSM_SETTLEMENTS_FILE = DATA_ROOT / "planning" / "osm_ireland_settlements.gpkg"
+# OSM settlement/place nodes for geocoding PPR addresses
+# Extract from Geofabrik Ireland dump: place=city|town|village|suburb|hamlet
+# Fields: name, place (type), geometry (Point)
+
 # ── Scoring weights (should match composite_weights in DB) ────
 DEFAULT_WEIGHTS = {
     "energy": 0.25,

@@ -73,6 +73,10 @@ BEGIN
                 WHEN v_sort = 'planning' AND v_metric = 'score'              THEN p.score
                 WHEN v_sort = 'planning' AND v_metric = 'zoning_tier'        THEN p.zoning_tier
                 WHEN v_sort = 'planning' AND v_metric = 'planning_precedent' THEN p.planning_precedent
+                WHEN v_sort = 'planning' AND v_metric = 'land_price'         THEN p.land_price_score
+                WHEN v_sort = 'planning' AND v_metric = 'avg_price_per_sqm_eur' THEN
+                    -- INVERTED: lower €/m² = better for siting = higher score
+                    100 - (p.avg_price_per_sqm_eur - mr.min_val) / NULLIF(mr.max_val - mr.min_val, 0) * 100
                 -- ── FALLBACK ─────────────────────────────────────────────
                 ELSE NULL
             END AS value

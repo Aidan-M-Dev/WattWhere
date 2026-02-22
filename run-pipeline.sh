@@ -76,9 +76,9 @@ elapsed
 if [[ "$SKIP_SCHEMA" == false && "$ONLY" == "" ]]; then
   echo ""
   echo "[1] Applying DB schema..."
-  $DB_EXEC -f /docker-entrypoint-initdb.d/tables.sql 2>&1 | tail -3
-  $DB_EXEC -f /docker-entrypoint-initdb.d/indexes.sql 2>&1 | tail -3
-  $DB_EXEC -f /docker-entrypoint-initdb.d/functions.sql 2>&1 | tail -3
+  $DB_EXEC -f /docker-entrypoint-initdb.d/01_tables.sql 2>&1 | tail -3
+  $DB_EXEC -f /docker-entrypoint-initdb.d/02_indexes.sql 2>&1 | tail -3
+  $DB_EXEC -f /docker-entrypoint-initdb.d/03_functions.sql 2>&1 | tail -3
   echo "  Schema applied."
   elapsed
 
