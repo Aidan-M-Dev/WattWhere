@@ -20,6 +20,7 @@
     <!-- Main content area: map + sidebar side by side -->
     <div class="app-main">
       <MapView class="app-map" />
+      <img src="/logo.svg" alt="WattWhere" class="app-logo" />
       <Sidebar class="app-sidebar" />
     </div>
 
@@ -91,6 +92,17 @@ html, body, #app {
 .app-map {
   flex: 1;
   position: relative;
+}
+
+/* Logo: overlaid top-left of the map */
+.app-logo {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  width: 200px;
+  height: auto;
+  z-index: 150;
+  pointer-events: none;
 }
 
 /* Sidebar: absolute positioned, slides in from right */
