@@ -103,12 +103,9 @@ if [[ "$SKIP_DOWNLOAD" == false && "$ONLY" != "__composite_only__" ]]; then
   if [[ -n "$ONLY" && "$ONLY" != "__composite_only__" ]]; then
     # Download for one sort only
     case "$ONLY" in
-      energy|environment|cooling|connectivity)
+      energy|environment|cooling|connectivity|planning)
         echo "  Downloading $ONLY sources..."
         $PIPELINE python "$ONLY/download_sources.py"
-        ;;
-      planning)
-        echo "  No download script for $ONLY (uses config.py constants or manual data)"
         ;;
     esac
   else
