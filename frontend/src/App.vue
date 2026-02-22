@@ -26,20 +26,41 @@
 
     <!-- DataBar: sort tiles + sub-metric pills — fixed at bottom -->
     <DataBar class="app-databar" />
+
+    <!-- Toast notifications (error/warning/info) — fixed top-right overlay -->
+    <ToastContainer />
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, onUnmounted } from 'vue'
 import { useSuitabilityStore } from '@/stores/suitability'
+import { useToast } from '@/composables/useToast'
 import DataBar from '@/components/DataBar.vue'
 import MapView from '@/components/MapView.vue'
 import Sidebar from '@/components/Sidebar.vue'
+import ToastContainer from '@/components/ToastContainer.vue'
 
 const store = useSuitabilityStore()
+const { push: pushToast, remove: removeToast } = useToast()
+
+// ── Offline / online detection ─────────────────────────────────
+function onOffline() {
+  pushToast({ id: 'offline', message: 'No internet connection', type: 'warning' })
+}
+function onOnline() {
+  removeToast('offline')
+}
 
 onMounted(async () => {
+  window.addEventListener('offline', onOffline)
+  window.addEventListener('online', onOnline)
   await store.init()
+})
+
+onUnmounted(() => {
+  window.removeEventListener('offline', onOffline)
+  window.removeEventListener('online', onOnline)
 })
 
 // ── Per-sort accent colours (from Figma SVG) ────────────────

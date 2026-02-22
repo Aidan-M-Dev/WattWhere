@@ -25,12 +25,15 @@ import type {
   SuitabilityState,
 } from '@/types'
 import { FeatureCollection, Point } from 'geojson'
+import { useToast } from '@/composables/useToast'
 
 // ── API base URL ──────────────────────────────────────────────
 // Proxied via Vite dev server (/api → http://api:8000)
 const API_BASE = '/api'
 
 export const useSuitabilityStore = defineStore('suitability', () => {
+  const { push: pushToast } = useToast()
+
   // ── State ───────────────────────────────────────────────────
 
   const activeSort = ref<SortType>('overall')
@@ -92,6 +95,7 @@ export const useSuitabilityStore = defineStore('suitability', () => {
       sortsMeta.value = data
     } catch (err) {
       error.value = err instanceof Error ? err.message : 'Failed to load sorts metadata'
+      pushToast({ id: 'sorts-error', message: 'Failed to load sort metadata — API may be down', type: 'error' })
     } finally {
       loading.value = false
     }
@@ -131,6 +135,7 @@ export const useSuitabilityStore = defineStore('suitability', () => {
       sidebarOpen.value = true
     } catch (err) {
       error.value = err instanceof Error ? err.message : 'Failed to load tile data'
+      pushToast({ id: 'tile-error', message: 'Failed to load tile detail — API may be down', type: 'error' })
       sidebarOpen.value = true  // still open sidebar to show error state
     } finally {
       loading.value = false

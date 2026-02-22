@@ -38,10 +38,6 @@
     <!-- Map Legend: positioned bottom-left inside map viewport -->
     <MapLegend class="map-legend" />
 
-    <!-- Toast notification for tile load errors -->
-    <div v-if="tileError" class="map-toast">
-      Map data unavailable — check server
-    </div>
   </div>
 </template>
 
@@ -49,14 +45,15 @@
 import { ref, watch, onMounted, onUnmounted, computed } from 'vue'
 import maplibregl from 'maplibre-gl'
 import { useSuitabilityStore } from '@/stores/suitability'
+import { useToast } from '@/composables/useToast'
 import { COLOR_RAMPS, TEMPERATURE_RAMP } from '@/types'
 import MapLegend from '@/components/MapLegend.vue'
 import irelandCounties from '@/assets/ireland-counties.json'
 
 const store = useSuitabilityStore()
+const { push: pushToast } = useToast()
 
 const mapEl = ref<HTMLDivElement | null>(null)
-const tileError = ref(false)
 let map: maplibregl.Map | null = null
 let hoveredTileId: number | null = null
 
@@ -369,8 +366,11 @@ function setupInteractions() {
   // narrows the type and avoids an unsafe 'any' cast.
   map.on('error', (e) => {
     if ('sourceId' in e && (e as any).sourceId === 'tiles-mvt') {
-      tileError.value = true
-      setTimeout(() => { tileError.value = false }, 5000)
+      pushToast({
+        id: 'martin-error',
+        message: 'Map tile data unavailable — check server',
+        type: 'error',
+      })
     }
   })
 }
@@ -476,16 +476,4 @@ watch(() => store.sidebarOpen, (isOpen) => {
   z-index: 20;
 }
 
-.map-toast {
-  position: absolute;
-  top: 12px;
-  left: 50%;
-  transform: translateX(-50%);
-  background: rgba(220, 53, 69, 0.9);
-  color: white;
-  padding: 8px 16px;
-  border-radius: 6px;
-  font-size: 13px;
-  z-index: 50;
-}
 </style>
