@@ -618,7 +618,7 @@ def download_ppr():
     print("\n  Could not download PPR data.")
     print("  Falling back to synthetic transaction data.")
     df = _generate_synthetic_ppr()
-    df.to_csv(PPR_FILE, index=False, encoding="latin-1")
+    df.to_csv(PPR_FILE, index=False, encoding="utf-8")
     print(f"  Saved to {PPR_FILE}")
 
 

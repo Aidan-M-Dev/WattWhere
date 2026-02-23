@@ -493,7 +493,7 @@ def compute_land_pricing(
     # ── Load PPR ───────────────────────────────────────────────
     print("  Loading PPR CSV...")
     # PPR CSV uses €-prefixed prices and Irish date format
-    ppr = pd.read_csv(ppr_path, encoding="latin-1")
+    ppr = pd.read_csv(ppr_path, encoding="utf-8-sig")
 
     # Normalise column names — PPR headers sometimes have \ufeff BOM or extra spaces
     ppr.columns = ppr.columns.str.strip().str.replace("\ufeff", "")
